@@ -191,7 +191,7 @@ def calcular_mmr(mmr_jogador: float, mmr_medio: float, colocacao: int, k: int, j
         elif colocacao == 2:
             rr = 0.65
         elif colocacao in [3, 4]:
-            rr = 0.625
+            rr = 0.3
 
     elif jogadores_quantity >= 8:
         if colocacao == 1:
@@ -200,7 +200,7 @@ def calcular_mmr(mmr_jogador: float, mmr_medio: float, colocacao: int, k: int, j
             rr = 0.8
         elif colocacao in [3, 4]:
             rr = 0.625
-        elif colocacao in [5, 8]:
+        elif colocacao in range(5, 9):  # 5, 6, 7, 8
             rr = 0.25
 
     elif jogadores_quantity >= 16:
@@ -210,9 +210,9 @@ def calcular_mmr(mmr_jogador: float, mmr_medio: float, colocacao: int, k: int, j
             rr = 1.0
         elif colocacao in [3, 4]:
             rr = 0.8
-        elif colocacao in [5, 8]:
+        elif colocacao in range(5, 9):  # 5, 6, 7, 8
             rr = 0.5
-        elif colocacao in [9, 16]:
+        elif colocacao in range(9, 17):  # 9 até 16
             rr = 0.25
     else:
         return 0
@@ -268,7 +268,7 @@ def processar_matchmaking(session, autor_id: int, k: int):
         membro_db = session.query(MatchPartidaParticipantes).filter_by(discord_id=membro.discord_id).first()
         if not membro_db:
             print("Adicionando")
-            add_member = MatchPartidaParticipantes(membro.discord_id, membro.discord_name, autor_id, membro.player_pos, equipe_id)
+            add_member = MatchPartidaParticipantes(membro.discord_id, membro.discord_name, autor_id, membro.player_pos, membro.equipe_id)
             session.add(add_member)
             session.commit()
             print("Adicionado")
