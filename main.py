@@ -2,7 +2,7 @@ import discord, config_bot, os, db, functions
 from discord.ext import commands
 from discord.ext.commands import Bot
 from db import MatchParticipantes
-from ui.buttons.start_mathmaking import StartMatchMaking
+from ui.buttons.start_mathmaking import StartMatchMakingV2
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
 
 bot = Bot(command_prefix=config_bot.PREFIX, intents=discord.Intents.all())
@@ -17,7 +17,7 @@ async def load_commands():
 @bot.event
 async def on_ready():
     print("Bot online: ", bot.user)
-    bot.add_view(StartMatchMaking(bot))
+    bot.add_view(StartMatchMakingV2(bot))
     user = bot.get_user(config_bot.OWNER_ID)
     await load_commands()
 
