@@ -1,5 +1,4 @@
 # Credenciais e configurações sensíveis
-config_bot.py
 .env
 .env.local
 .env.*.local
