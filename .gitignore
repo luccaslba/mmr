@@ -1,7 +1,10 @@
 # Credenciais e configurações sensíveis
 config_bot.py
 .env
+.env.local
+.env.*.local
 *.env
+!.env.example
 
 # Banco de dados
 database.db
