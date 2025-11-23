@@ -62,6 +62,18 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
 
 
     jogadores_por_time = int(formato.split("x")[0])
+    jogadores_por_partida = jogadores_por_time * 2  # Exemplo: 2x2 = 4 pessoas por partida
+
+    # Calcular total de pessoas necessárias
+    # vagas = número de vagas do torneio (exemplo: 8 vagas)
+    # Para 1x1: 8 vagas = 8 pessoas
+    # Para 2x2: 8 vagas = 8 equipes = 16 pessoas
+    # Para 3x3: 8 vagas = 8 equipes = 24 pessoas
+    if formato == "1x1":
+        total_pessoas_necessarias = vagas
+    else:
+        total_pessoas_necessarias = vagas * jogadores_por_time
+
     cargos_vip_db = session.query(RolesVips).order_by(RolesVips.peso.desc()).all()
     cargos_vip = {int(cargo.role_id): cargo.peso for cargo in cargos_vip_db}
 
@@ -77,16 +89,19 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
     # Ordenar por peso (VIPs mais prioritários primeiro)
     jogadores_com_peso.sort(key=lambda x: x[1], reverse=True)
 
-    # Remover jogadores que excedem o múltiplo de vagas
-    multiplo_max = (len(jogadores_com_peso) // vagas) * vagas
+    # Selecionar apenas múltiplos de jogadores_por_partida
+    # Exemplo: 20 pessoas, partida 2x2 (4 por partida) → 20 // 4 = 5 partidas → 5 * 4 = 20 pessoas
+    # Exemplo: 18 pessoas, partida 2x2 (4 por partida) → 18 // 4 = 4 partidas → 4 * 4 = 16 pessoas
+    multiplo_max = (len(jogadores_com_peso) // jogadores_por_partida) * jogadores_por_partida
     jogadores_selecionados = [j for j, _ in jogadores_com_peso[:multiplo_max]]
 
-    if len(jogadores_selecionados) < vagas:
+    if len(jogadores_selecionados) < jogadores_por_partida:
+        texto_formato = f"{vagas} vagas ({total_pessoas_necessarias} pessoas)" if formato != "1x1" else f"{vagas} jogadores"
         embed = discord.Embed(
             title="❌ Jogadores insuficientes!",
             description=(
-                f"Eram necessários **{vagas}** jogadores para o formato `{formato}`.\n"
-                f"Apenas **{len(jogadores)}** reagiram ao evento. Nenhum grupo completo foi formado."
+                f"Eram necessários pelo menos **{jogadores_por_partida}** jogadores para formar uma partida no formato `{formato}`.\n"
+                f"Apenas **{len(jogadores)}** reagiram ao evento válidos. Nenhuma partida foi formada."
             ),
             color=discord.Color.red()
         )
@@ -119,16 +134,20 @@ def sortear_partidas(jogadores_discord, formato: str):
             "mmr": jogador_db.MRR
         })
 
-    # Ordena e embaralha
+    # Ordena por MMR (maior para menor) - SEM shuffle global
     jogadores_ordenados = sorted(jogadores_com_mmr, key=lambda j: j["mmr"], reverse=True)
-    random.shuffle(jogadores_ordenados)
 
     partidas = []
 
+    # Distribui jogadores em partidas baseado em MMR
+    # Partida 1: 8 melhores MMR, Partida 2: 8 piores MMR, etc.
     for i in range(0, len(jogadores_ordenados), jogadores_por_partida):
         grupo = jogadores_ordenados[i:i+jogadores_por_partida]
         if len(grupo) < jogadores_por_partida:
             break  # Não tem jogadores suficientes para formar uma nova partida
+
+        # Embaralha APENAS dentro desta partida para confrontos aleatórios
+        random.shuffle(grupo)
 
         time1 = grupo[:jogadores_por_time]
         time2 = grupo[jogadores_por_time:]
