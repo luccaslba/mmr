@@ -185,13 +185,18 @@ def calcular_mmr(mmr_jogador: float, mmr_medio: float, colocacao: int, k: int, j
 #5º-8º lugar RR = 0.5
 #9º-16º Lugar RR = 0.25
     rr = 0
-    if jogadores_quantity >= 4:
+    # Verificar do maior para o menor para evitar conflitos
+    if jogadores_quantity >= 16:
         if colocacao == 1:
-            rr = 0.8
+            rr = 1.2
         elif colocacao == 2:
-            rr = 0.65
+            rr = 1.0
         elif colocacao in [3, 4]:
-            rr = 0.3
+            rr = 0.8
+        elif colocacao in range(5, 9):  # 5, 6, 7, 8
+            rr = 0.5
+        elif colocacao in range(9, 17):  # 9 até 16
+            rr = 0.25
 
     elif jogadores_quantity >= 8:
         if colocacao == 1:
@@ -203,17 +208,13 @@ def calcular_mmr(mmr_jogador: float, mmr_medio: float, colocacao: int, k: int, j
         elif colocacao in range(5, 9):  # 5, 6, 7, 8
             rr = 0.25
 
-    elif jogadores_quantity >= 16:
+    elif jogadores_quantity >= 4:
         if colocacao == 1:
-            rr = 1.2
-        elif colocacao == 2:
-            rr = 1.0
-        elif colocacao in [3, 4]:
             rr = 0.8
-        elif colocacao in range(5, 9):  # 5, 6, 7, 8
-            rr = 0.5
-        elif colocacao in range(9, 17):  # 9 até 16
-            rr = 0.25
+        elif colocacao == 2:
+            rr = 0.65
+        elif colocacao in [3, 4]:
+            rr = 0.3
     else:
         return 0
 
