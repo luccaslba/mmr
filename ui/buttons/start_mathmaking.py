@@ -64,38 +64,61 @@ class DataHorarioModal(Modal, title="Data e Horário do Evento"):
             "bdf": "BDF"
         }.get(self.tipo_evento, self.tipo_evento)
 
+        # Calcular total de pessoas
+        jogadores_por_time = int(self.formato.split("x")[0])
+        if self.formato == "1x1":
+            total_pessoas = self.vagas
+            texto_vagas = f"**Vagas:** `{self.vagas} jogadores`"
+        else:
+            total_pessoas = self.vagas * jogadores_por_time
+            texto_vagas = f"**Vagas:** `{self.vagas} equipes` ({total_pessoas} pessoas)"
+
+        # Texto diferente para BDF
+        if self.tipo_evento == "bdf":
+            instrucao = f"⚔️ **Evento BDF - Vagas Garantidas**\nO organizador irá adicionar os participantes manualmente."
+        else:
+            instrucao = "Reaja com ✅ para participar!"
+
         embed = Embed(
-            title="🎯 Matchmaking Aberto!",
+            title=f"🏆 Torneio {self.formato} - {tipo_nome}",
             description=(
-                f"**Evento:** `{tipo_nome}`\n"
+                f"**Organizador:** {interaction.user.mention}\n"
                 f"**Formato:** `{self.formato}`\n"
-                f"**Vagas:** `{self.vagas}`\n"
+                f"{texto_vagas}\n"
                 f"**Data:** `{self.data.value}` às `{self.horario.value}`\n\n"
-                f"Reaja com ✅ para participar!"
+                f"{instrucao}"
             ),
-            color=discord.Color.green()
+            color=discord.Color.gold() if self.tipo_evento == "bdf" else discord.Color.green()
         )
+        embed.set_footer(text=f"Organizado por {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
 
         channel = interaction.guild.get_channel(config.matchmaking_channel_id)
         if not channel:
             return await interaction.followup.send("Canal de matchmaking não encontrado.", ephemeral=True)
 
         message = await channel.send(embed=embed)
-        await message.add_reaction("✅")
 
-        asyncio.create_task(functions.aguardar_e_iniciar_matchmaking(
-            self.bot,
-            interaction.guild.id,
-            channel.id,
-            message.id,
-            self.formato,
-            self.vagas,
-            self.tipo_evento,
-            datahora,
-            interaction.user
-        ))
+        # BDF não usa reações
+        if self.tipo_evento != "bdf":
+            await message.add_reaction("✅")
 
-        await interaction.followup.send(f"✅ Evento de matchmaking criado com **{self.vagas} vagas**!", ephemeral=True)
+            asyncio.create_task(functions.aguardar_e_iniciar_matchmaking(
+                self.bot,
+                interaction.guild.id,
+                channel.id,
+                message.id,
+                self.formato,
+                self.vagas,
+                self.tipo_evento,
+                datahora,
+                interaction.user
+            ))
+
+        await interaction.followup.send(
+            f"✅ Torneio {self.formato} criado com **{self.vagas} vagas**!\n"
+            f"{'📋 Adicione os participantes manualmente.' if self.tipo_evento == 'bdf' else ''}",
+            ephemeral=True
+        )
 
 
 # Select Menu para Formato
@@ -103,14 +126,12 @@ class FormatoSelect(Select):
     def __init__(self, bot):
         self.bot = bot
         options = [
-            discord.SelectOption(label="1x1", value="1x1", emoji="👤", description="2 jogadores (1 vs 1)"),
-            discord.SelectOption(label="2x2", value="2x2", emoji="👥", description="4 jogadores (2 vs 2)"),
-            discord.SelectOption(label="3x3", value="3x3", emoji="👥", description="6 jogadores (3 vs 3)"),
-            discord.SelectOption(label="4x4", value="4x4", emoji="👥", description="8 jogadores (4 vs 4)"),
-            discord.SelectOption(label="5x5", value="5x5", emoji="👥", description="10 jogadores (5 vs 5)"),
+            discord.SelectOption(label="1x1", value="1x1", emoji="👤", description="Torneio individual (1 vs 1)"),
+            discord.SelectOption(label="2x2", value="2x2", emoji="👥", description="Torneio de duplas (2 vs 2)"),
+            discord.SelectOption(label="3x3", value="3x3", emoji="👥", description="Torneio de trios (3 vs 3)"),
         ]
         super().__init__(
-            placeholder="📋 Selecione o formato da partida",
+            placeholder="📋 Selecione o formato do torneio",
             options=options,
             custom_id="formato_select"
         )
@@ -133,11 +154,44 @@ class VagasSelect(Select):
     def __init__(self, bot, formato: str):
         self.bot = bot
         self.formato = formato
-        options = [
-            discord.SelectOption(label="4 vagas", value="4", emoji="4️⃣", description="Partidas pequenas"),
-            discord.SelectOption(label="8 vagas", value="8", emoji="8️⃣", description="Partidas médias"),
-            discord.SelectOption(label="16 vagas", value="16", emoji="🔢", description="Partidas grandes"),
-        ]
+
+        # Calcular número de pessoas baseado no formato
+        jogadores_por_time = int(formato.split("x")[0])
+
+        # 1x1: vagas = jogadores | 2x2: vagas = equipes, pessoas = vagas * 2 | 3x3: vagas = equipes, pessoas = vagas * 3
+        if formato == "1x1":
+            options = [
+                discord.SelectOption(label="4 vagas", value="4", emoji="4️⃣", description="4 jogadores → Semi-final e Final"),
+                discord.SelectOption(label="8 vagas", value="8", emoji="8️⃣", description="8 jogadores → Quartas, Semi e Final"),
+                discord.SelectOption(label="16 vagas", value="16", emoji="🔢", description="16 jogadores → Oitavas, Quartas, Semi e Final"),
+            ]
+        else:
+            # Para 2x2 e 3x3
+            total_4 = 4 * jogadores_por_time
+            total_8 = 8 * jogadores_por_time
+            total_16 = 16 * jogadores_por_time
+
+            options = [
+                discord.SelectOption(
+                    label="4 vagas",
+                    value="4",
+                    emoji="4️⃣",
+                    description=f"4 equipes ({total_4} pessoas) → Semi e Final"
+                ),
+                discord.SelectOption(
+                    label="8 vagas",
+                    value="8",
+                    emoji="8️⃣",
+                    description=f"8 equipes ({total_8} pessoas) → Quartas, Semi e Final"
+                ),
+                discord.SelectOption(
+                    label="16 vagas",
+                    value="16",
+                    emoji="🔢",
+                    description=f"16 equipes ({total_16} pessoas) → Oitavas, Quartas, Semi e Final"
+                ),
+            ]
+
         super().__init__(
             placeholder="📊 Selecione a quantidade de vagas",
             options=options,
@@ -188,7 +242,7 @@ class TipoEventoSelect(Select):
                 label="BDF",
                 value="bdf",
                 emoji="⚔️",
-                description="Batalha de Free (modo especial)"
+                description="Vagas garantidas - Seleção manual de participantes"
             ),
         ]
         super().__init__(
