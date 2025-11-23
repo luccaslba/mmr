@@ -1,0 +1,6 @@
+LOADING = "⟳"
+SUCESS = "✅"
+FAILED = "❌"
+LIXO = "🗑️"
+CONFIG = "⚙️"
+PAPEL = "📝"
