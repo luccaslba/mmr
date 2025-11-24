@@ -333,7 +333,8 @@ async def finalizar_torneio(session, autor_id, classificacao, participantes, for
 
         return {
             'sucesso': True,
-            'resultados': resultados
+            'resultados': resultados,
+            'k_usado': K
         }
 
     except Exception as e:

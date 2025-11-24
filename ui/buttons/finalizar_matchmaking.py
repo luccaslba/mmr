@@ -66,12 +66,13 @@ class ClassificacaoSelect(Select):
 
 
 class FinalizarTorneioView(View):
-    def __init__(self, bot, autor: discord.Member, participantes, formato: str):
+    def __init__(self, bot, autor: discord.Member, participantes, formato: str, tipo_evento: str = "aberto"):
         super().__init__(timeout=300)
         self.bot = bot
         self.autor = autor
         self.participantes = participantes
         self.formato = formato
+        self.tipo_evento = tipo_evento
         self.classificacao = {}  # {posicao: user_id}
 
         num_participantes = len(participantes)
@@ -124,10 +125,59 @@ class FinalizarTorneioView(View):
             )
             return await interaction.response.send_message(embed=failed, ephemeral=True)
 
-        # Abrir modal para pedir valor
-        await interaction.response.send_modal(
-            FinalizarTorneioValorModal(self.bot, self.autor, self.participantes, self.formato, classificacao_temp)
+        # Processar finalização direto (sem pedir valor, K é fixo agora)
+        await interaction.response.defer(ephemeral=True)
+
+        # Processar finalização
+        resultado = await functions.finalizar_torneio(
+            session,
+            self.autor.id,
+            classificacao_temp,
+            self.participantes,
+            self.formato,
+            0,  # valor_partida removido, não é mais usado
+            interaction.guild.id,
+            self.tipo_evento  # tipo_evento da View
         )
+
+        if resultado['sucesso']:
+            # Criar embed de resultado
+            embed = Embed(
+                title=f"🏆 Torneio Finalizado - {self.formato}",
+                description=f"**Organizador:** {self.autor.mention}\n**K usado:** {resultado.get('k_usado', 'N/A')}\n",
+                color=discord.Color.gold()
+            )
+
+            for pos, dados in sorted(resultado['resultados'].items()):
+                emoji = {1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣"}.get(pos, f"{pos}º")
+                user = discord.utils.get(interaction.guild.members, id=dados['user_id'])
+
+                delta = dados['delta_mmr']
+                sinal = "+" if delta >= 0 else ""
+
+                embed.add_field(
+                    name=f"{emoji} {pos}º Lugar",
+                    value=f"{user.mention}\n{sinal}{delta} MMR → **{dados['mmr_novo']} MMR**",
+                    inline=True
+                )
+
+            embed.set_footer(text=f"Organizado por {self.autor.name}", icon_url=self.autor.display_avatar.url)
+
+            await interaction.followup.send(embed=embed)
+
+            # Limpar participantes
+            participantes_db = session.query(MatchParticipantes).filter_by(autor_id=self.autor.id).all()
+            for part in participantes_db:
+                session.delete(part)
+            session.commit()
+
+        else:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Erro ao finalizar!",
+                description=f"```{resultado['erro']}```",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=failed, ephemeral=True)
 
 
 class FinalizarTorneioValorModal(Modal, title="Valor da Partida"):
@@ -275,7 +325,7 @@ class FinalizarMatchmaking(View):
             return await interaction.response.send_message(embed=failed, ephemeral=True)
 
         # Mostrar view de classificação
-        view = FinalizarTorneioView(self.bot, self.autor, participantes, self.formato)
+        view = FinalizarTorneioView(self.bot, self.autor, participantes, self.formato, self.tipo_evento)
 
         embed = Embed(
             title="📋 Classificar Participantes",
