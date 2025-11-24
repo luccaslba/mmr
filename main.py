@@ -58,4 +58,44 @@ async def teste(ctx: commands.Context):
             db.session.add(add)
             db.session.commit()
 
+@bot.command()
+async def migrate(ctx: commands.Context):
+    """Comando para executar migração do banco de dados"""
+    if ctx.author.id == config_bot.OWNER_ID:
+        import sqlite3
+
+        try:
+            conn = sqlite3.connect('database.db')
+            cursor = conn.cursor()
+
+            # Verificar se a coluna já existe
+            cursor.execute("PRAGMA table_info(GuildConfig)")
+            columns = [column[1] for column in cursor.fetchall()]
+
+            if 'bdf_role_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN bdf_role_id INTEGER")
+                conn.commit()
+                e = discord.Embed(
+                    title="✅ Migração concluída!",
+                    description="Coluna `bdf_role_id` adicionada com sucesso.",
+                    color=discord.Color.green()
+                )
+            else:
+                e = discord.Embed(
+                    title="⚠️ Migração desnecessária",
+                    description="Coluna `bdf_role_id` já existe no banco de dados.",
+                    color=discord.Color.orange()
+                )
+
+            conn.close()
+            await ctx.reply(embed=e)
+
+        except Exception as ex:
+            e = discord.Embed(
+                title="❌ Erro na migração",
+                description=f"```{str(ex)}```",
+                color=discord.Color.red()
+            )
+            await ctx.reply(embed=e)
+
 bot.run(config_bot.TOKEN)
