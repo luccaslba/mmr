@@ -2,14 +2,14 @@ import discord, config_bot, emojis, db
 from asyncio import sleep
 from discord import app_commands, Embed
 from discord.ext.commands import Cog
-from ui.buttons.start_mathmaking import StartMatchMaking
+from ui.buttons.start_matchmaking import StartMatchMakingV2
 
 class SendStartMatchMaking(Cog):
     def __init__(self, bot):
         self.bot = bot
 
     @app_commands.command(description="Envia o Iniciar Matchmaking")
-    async def send_mathmaking(self, interact: discord.Interaction):
+    async def send_matchmaking(self, interact: discord.Interaction):
 
         load = Embed(
             description=f" {emojis.LOADING} | Carregando... ",
@@ -38,7 +38,7 @@ class SendStartMatchMaking(Cog):
                 )
 
                 await interact.edit_original_response(embed=send)
-                await mrr_channel.send(embed=mrr, view=StartMatchMaking(self.bot))
+                await mrr_channel.send(embed=mrr, view=StartMatchMakingV2(self.bot))
 
 async def setup(bot):
     await bot.add_cog(SendStartMatchMaking(bot))

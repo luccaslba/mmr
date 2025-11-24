@@ -2,7 +2,7 @@ import discord, config_bot, os, db, functions
 from discord.ext import commands
 from discord.ext.commands import Bot
 from db import MatchParticipantes
-from ui.buttons.start_mathmaking import StartMatchMakingV2
+from ui.buttons.start_matchmaking import StartMatchMakingV2
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
 
 bot = Bot(command_prefix=config_bot.PREFIX, intents=discord.Intents.all())
