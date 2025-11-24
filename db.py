@@ -118,4 +118,21 @@ class RolesVips(Base):
         self.role_id = role_id
         self.peso = peso
 
+class ConstantesK(Base):
+    __tablename__ = "ConstantesK"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer)
+    k_ranqueada = Column(Integer, default=5)
+    k_aberto = Column(Integer, default=20)
+    k_fechado = Column(Integer, default=40)
+    k_bdf = Column(Integer, default=100)
+
+    def __init__(self, guild_id, k_ranqueada=5, k_aberto=20, k_fechado=40, k_bdf=100):
+        self.guild_id = guild_id
+        self.k_ranqueada = k_ranqueada
+        self.k_aberto = k_aberto
+        self.k_fechado = k_fechado
+        self.k_bdf = k_bdf
+
 Base.metadata.create_all(bind=db)

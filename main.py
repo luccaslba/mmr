@@ -68,26 +68,58 @@ async def migrate(ctx: commands.Context):
             conn = sqlite3.connect('database.db')
             cursor = conn.cursor()
 
-            # Verificar se a coluna já existe
+            migracoes_aplicadas = []
+            migracoes_desnecessarias = []
+
+            # Migração 1: Adicionar coluna bdf_role_id
             cursor.execute("PRAGMA table_info(GuildConfig)")
             columns = [column[1] for column in cursor.fetchall()]
 
             if 'bdf_role_id' not in columns:
                 cursor.execute("ALTER TABLE GuildConfig ADD COLUMN bdf_role_id INTEGER")
                 conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `bdf_role_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `bdf_role_id` já existe")
+
+            # Migração 2: Criar tabela ConstantesK
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ConstantesK'")
+            tabela_existe = cursor.fetchone()
+
+            if not tabela_existe:
+                cursor.execute("""
+                    CREATE TABLE ConstantesK (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id INTEGER NOT NULL,
+                        k_ranqueada INTEGER DEFAULT 5,
+                        k_aberto INTEGER DEFAULT 20,
+                        k_fechado INTEGER DEFAULT 40,
+                        k_bdf INTEGER DEFAULT 100
+                    )
+                """)
+                conn.commit()
+                migracoes_aplicadas.append("✅ Tabela `ConstantesK` criada com sucesso")
+            else:
+                migracoes_desnecessarias.append("Tabela `ConstantesK` já existe")
+
+            conn.close()
+
+            # Criar embed de resultado
+            if migracoes_aplicadas:
                 e = discord.Embed(
-                    title="✅ Migração concluída!",
-                    description="Coluna `bdf_role_id` adicionada com sucesso.",
+                    title="✅ Migrações concluídas!",
+                    description="\n".join(migracoes_aplicadas),
                     color=discord.Color.green()
                 )
+                if migracoes_desnecessarias:
+                    e.add_field(name="⚠️ Já existentes", value="\n".join(migracoes_desnecessarias), inline=False)
             else:
                 e = discord.Embed(
-                    title="⚠️ Migração desnecessária",
-                    description="Coluna `bdf_role_id` já existe no banco de dados.",
+                    title="⚠️ Migrações desnecessárias",
+                    description="Todas as migrações já foram aplicadas:\n" + "\n".join(migracoes_desnecessarias),
                     color=discord.Color.orange()
                 )
 
-            conn.close()
             await ctx.reply(embed=e)
 
         except Exception as ex:

@@ -166,7 +166,9 @@ class FinalizarTorneioValorModal(Modal, title="Valor da Partida"):
             self.classificacao,
             self.participantes,
             self.formato,
-            valor_partida
+            valor_partida,
+            interaction.guild.id,
+            self.tipo_evento
         )
 
         if resultado['sucesso']:
@@ -216,12 +218,13 @@ class FinalizarTorneioValorModal(Modal, title="Valor da Partida"):
 
 
 class FinalizarMatchmaking(View):
-    def __init__(self, bot, autor: discord.Member, jogadores_sorteados_ids=None, formato="1x1"):
+    def __init__(self, bot, autor: discord.Member, jogadores_sorteados_ids=None, formato="1x1", tipo_evento="aberto"):
         super().__init__(timeout=None)
         self.bot = bot
         self.autor = autor
         self.jogadores_sorteados_ids = jogadores_sorteados_ids or []
         self.formato = formato
+        self.tipo_evento = tipo_evento
 
     @discord.ui.button(label="Finalizar Torneio", style=discord.ButtonStyle.green, emoji="🏆", custom_id="finalizar_torneio_v2")
     async def finalizar(self, interaction: discord.Interaction, btn: Button):

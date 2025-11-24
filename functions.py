@@ -1,9 +1,45 @@
 import asyncio, discord, random, pytz
 from datetime import datetime, timezone, date
 from sqlalchemy.orm import sessionmaker
-from db import session, Users, Guild_Config, CloseMatchMember, MatchParticipantes, MatchPartidaParticipantes, RolesVips
+from db import session, Users, Guild_Config, CloseMatchMember, MatchParticipantes, MatchPartidaParticipantes, RolesVips, ConstantesK
 from discord import Embed
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
+
+def obter_k_por_tipo_evento(guild_id, tipo_evento):
+    """
+    Retorna o valor de K baseado no tipo de evento
+
+    Args:
+        guild_id: ID do servidor
+        tipo_evento: Tipo do evento ('ranqueada', 'aberto', 'fechado', 'bdf')
+
+    Returns:
+        int: Valor de K configurado ou padrão
+    """
+    constantes = session.query(ConstantesK).filter_by(guild_id=guild_id).first()
+
+    # Valores padrão caso não tenha configuração
+    valores_padrao = {
+        'ranqueada': 5,
+        'aberto': 20,
+        'a': 20,  # alias para aberto
+        'fechado': 40,
+        'f': 40,  # alias para fechado
+        'bdf': 100
+    }
+
+    if constantes:
+        mapa_constantes = {
+            'ranqueada': constantes.k_ranqueada,
+            'aberto': constantes.k_aberto,
+            'a': constantes.k_aberto,
+            'fechado': constantes.k_fechado,
+            'f': constantes.k_fechado,
+            'bdf': constantes.k_bdf
+        }
+        return mapa_constantes.get(tipo_evento.lower(), 32)  # 32 como fallback
+
+    return valores_padrao.get(tipo_evento.lower(), 32)  # 32 como fallback
 
 async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, formato, vagas, tipo_evento, datahora, autor, modo_sorteio="unico"):
 
@@ -141,7 +177,7 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
             # Extrair lista de user IDs dos jogadores deste torneio
             jogadores_sorteados_ids = [jogador.id for jogador in grupo_jogadores]
 
-            await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor, jogadores_sorteados_ids, formato))
+            await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor, jogadores_sorteados_ids, formato, tipo_evento))
     else:
         # Sorteio único (modo padrão)
         partidas = sortear_partidas(jogadores_selecionados, formato)
@@ -150,7 +186,7 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
         # Extrair lista de user IDs dos jogadores sorteados
         jogadores_sorteados_ids = [jogador.id for jogador in jogadores_selecionados]
 
-        await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor, jogadores_sorteados_ids, formato))
+        await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor, jogadores_sorteados_ids, formato, tipo_evento))
 
 
 def sortear_partidas(jogadores_discord, formato: str):
@@ -236,7 +272,7 @@ def gerar_embed_partidas(partidas, formato, tipo_evento, numero_torneio=None, to
 
     return embed
 
-async def finalizar_torneio(session, autor_id, classificacao, participantes, formato, valor_partida):
+async def finalizar_torneio(session, autor_id, classificacao, participantes, formato, valor_partida, guild_id, tipo_evento):
     """
     Finaliza o torneio e calcula MMR baseado na classificação final
 
@@ -247,6 +283,8 @@ async def finalizar_torneio(session, autor_id, classificacao, participantes, for
         participantes: Lista de dicts com 'user' e 'mmr'
         formato: String do formato (1x1, 2x2, 3x3)
         valor_partida: Valor da partida
+        guild_id: ID do servidor
+        tipo_evento: Tipo do evento (aberto, fechado, bdf, ranqueada)
 
     Returns:
         Dict com 'sucesso' e 'resultados' ou 'erro'
@@ -258,7 +296,8 @@ async def finalizar_torneio(session, autor_id, classificacao, participantes, for
         mmr_total = sum(p['mmr'] for p in participantes)
         mmr_medio = mmr_total / num_jogadores
 
-        K = 32  # Constante K do ELO
+        # Buscar constante K baseada no tipo de evento
+        K = obter_k_por_tipo_evento(guild_id, tipo_evento)
 
         resultados = {}
 
