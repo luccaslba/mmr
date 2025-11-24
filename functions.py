@@ -194,6 +194,74 @@ def gerar_embed_partidas(partidas, formato, tipo_evento):
 
     return embed
 
+async def finalizar_torneio(session, autor_id, classificacao, participantes, formato, valor_partida):
+    """
+    Finaliza o torneio e calcula MMR baseado na classificação final
+
+    Args:
+        session: Sessão do banco de dados
+        autor_id: ID do organizador
+        classificacao: Dict {posicao: user_id}
+        participantes: Lista de dicts com 'user' e 'mmr'
+        formato: String do formato (1x1, 2x2, 3x3)
+        valor_partida: Valor da partida
+
+    Returns:
+        Dict com 'sucesso' e 'resultados' ou 'erro'
+    """
+    try:
+        num_jogadores = len(participantes)
+
+        # Calcular MMR médio
+        mmr_total = sum(p['mmr'] for p in participantes)
+        mmr_medio = mmr_total / num_jogadores
+
+        K = 32  # Constante K do ELO
+
+        resultados = {}
+
+        for posicao, user_id in classificacao.items():
+            # Buscar jogador no banco
+            user_db = session.query(Users).filter_by(discord_id=user_id).first()
+            if not user_db:
+                continue
+
+            mmr_antigo = user_db.MRR
+
+            # Calcular delta de MMR
+            delta_mmr = calcular_mmr(
+                mmr_jogador=mmr_antigo,
+                mmr_medio=mmr_medio,
+                colocacao=posicao,
+                k=K,
+                jogadores_quantity=num_jogadores
+            )
+
+            # Atualizar MMR
+            mmr_novo = mmr_antigo + int(delta_mmr)
+            user_db.MRR = mmr_novo
+
+            resultados[posicao] = {
+                'user_id': user_id,
+                'mmr_antigo': mmr_antigo,
+                'mmr_novo': mmr_novo,
+                'delta_mmr': int(delta_mmr)
+            }
+
+        session.commit()
+
+        return {
+            'sucesso': True,
+            'resultados': resultados
+        }
+
+    except Exception as e:
+        session.rollback()
+        return {
+            'sucesso': False,
+            'erro': str(e)
+        }
+
 def coletar_dados_usuarios(users):
     dados = []
     for u in users:

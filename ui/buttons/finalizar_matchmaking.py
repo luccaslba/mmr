@@ -1,190 +1,289 @@
-import discord, emojis, asyncio, pytz, functions, config_bot
-from datetime import datetime, timezone, time
+import discord, emojis, functions
 from discord import Embed
-from discord.ui import View, Button, Modal, TextInput
-from db import session, Users, Guild_Config, CloseMatchMember, MatchParticipantes
+from discord.ui import View, Button, Modal, TextInput, Select
+from db import session, Users, Guild_Config, MatchParticipantes
 
-class FinalizarConfig(Modal, title="Finalizar Matchmaking"):
-    valor_da_batalha = TextInput(label="Valor padrão da batalha:", placeholder="Ex: 12132", required=True)
-    def __init__(self, bot, autor: discord.Member):
+class FinalizarTorneioModal(Modal, title="Finalizar Torneio"):
+    valor_partida = TextInput(
+        label="Valor da Partida",
+        placeholder="Ex: 15000",
+        required=True,
+        style=discord.TextStyle.short
+    )
+
+    def __init__(self, bot, autor: discord.Member, participantes, formato: str):
         super().__init__(timeout=None)
         self.bot = bot
         self.autor = autor
+        self.participantes = participantes  # Lista de dicts com user e mmr
+        self.formato = formato
 
-    async def on_submit(self, interact: discord.Interaction):
-        bll_value = 0
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
         try:
-            bll_value = int(self.valor_da_batalha.value)
+            valor = int(self.valor_partida.value)
         except:
             failed = Embed(
-                title=f"{emojis.FAILED} | O valor da batalha precisa ser numeros!",
+                title=f"{emojis.FAILED} | O valor precisa ser um número!",
                 color=discord.Color.red()
             )
-            return await interact.response.send_message(embed=failed, ephemeral=True)
-        
-        sucess = Embed(
-            title=f"{emojis.SUCESS} | Selecione um participante para adicionar na lista",
-            description="Ele será adicionado a lista, e depois basta você continuar adicionando",
-            color=discord.Color.green()
+            return await interaction.followup.send(embed=failed, ephemeral=True)
+
+        # Aqui vamos pegar os dados da view que tem os selects
+        # Por enquanto, vamos mostrar erro pedindo para usar a view
+        failed = Embed(
+            title=f"{emojis.FAILED} | Use os dropdowns para selecionar as posições!",
+            color=discord.Color.red()
         )
-        users = session.query(MatchParticipantes).filter_by(autor_id=self.autor.id).all()
-        print(self.autor.id)
-        my_view = Finalizar(self.bot, self.autor, bll_value)
-        if not users:
-            failed = Embed(
-                title=f"{emojis.FAILED} | Nem um usuario registrado!",
-                color=discord.Color.red()
-            )
-            return await interact.response.send_message(embed=failed, ephemeral=True)
-        
-        my_view.add_item(ClassificacaoSelect(self.bot, self.autor, users))
-        await interact.response.send_message(embed=sucess, view=my_view, ephemeral=True)
+        await interaction.followup.send(embed=failed, ephemeral=True)
 
-class AdicionarParticcipante(Modal, title="Adicionar Participante"):
-    player_pos = TextInput(label="Posição do player:", placeholder="Numero daa colocação, Ex: 1(primeiro lugar), assim por diante", required=True)
-    equipe_id = TextInput(label="Id da equipe(se não tiver coloque: 0):", placeholder="Ex: 1", required=True)
 
-    def __init__(self, bot, autor: discord.Member, player_id):
-        super().__init__(timeout=None)
-        self.bot = bot
-        self.autor = autor
-        self.player_id = player_id
-
-    async def on_submit(self, interact: discord.Interaction):
-        guild = session.query(Guild_Config).filter_by(guild_id=interact.guild.id).first()
-        player_id = self.player_id
-        player_pos = 0
-        equipe_id = 0
-        try:
-            player_pos = int(self.player_pos.value)
-            equipe_id = int(self.equipe_id.value)
-        except:
-            failed = Embed(
-                title=f"{emojis.FAILED} | Alguns formatos está errado!",
-                color=discord.Color.red()
-            )
-            return await interact.response.send_message(embed=failed, ephemeral=True)
-        
-        member = session.query(Users).filter_by(discord_id=player_id).first()
-        db_member_match_close = session.query(CloseMatchMember).filter_by(discord_id=player_id).first()
-        if guild and member and not db_member_match_close:
-            if interact.user.id == self.autor.id or interact.user.get_role(guild.perm_cmd_role_id):
-                add_member = CloseMatchMember(member.discord_id, member.discord_name, self.autor.id, player_pos, equipe_id)
-                session.add(add_member)
-                session.commit()
-                sucess = Embed(
-                    title=f"{emojis.SUCESS} | Usuario adicionado na lista!",
-                    color=discord.Color.green()
-                )
-                await interact.response.send_message(embed=sucess, ephemeral=True)
-        else:
-            failed = Embed(
-                title=f"{emojis.FAILED} | Error",
-                description="**pode ser um desses erros:**",
-                color=discord.Color.red()
-            )
-            failed.add_field(name="Erro 1:", value="Pode ser porque o servidor não está configurado.")
-            failed.add_field(name="Erro 2:", value="Pode ser porque o membro não está registrado.")
-            failed.add_field(name="Erro 3:", value="Pode ser porque o membro já está na finalização.")
-            await interact.response.send_message(embed=failed, ephemeral=True)
-
-class ClassificacaoSelect(discord.ui.Select):
-    def __init__(self, bot, autor: discord.Member, users):
-        self.bot = bot
-        self.autor = autor
+class ClassificacaoSelect(Select):
+    def __init__(self, posicao: int, participantes, placeholder: str):
+        self.posicao = posicao
 
         options = [
-            discord.SelectOption(label=user.discord_name, value=str(user.discord_id))
-            for user in users
+            discord.SelectOption(
+                label=p['user'].name,
+                value=str(p['user'].id),
+                description=f"MMR: {p['mmr']}"
+            )
+            for p in participantes
         ]
+
         super().__init__(
-            placeholder="Selecione um jogador para continuar:",
+            placeholder=placeholder,
             min_values=1,
             max_values=1,
-            options=options
+            options=options,
+            custom_id=f"classificacao_{posicao}"
         )
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(AdicionarParticcipante(self.bot, self.autor, self.values[0]))
-        
+        # Apenas atualiza a view, não envia nada
+        await interaction.response.defer()
 
-class FinalizarMatchmaking(View):
-    def __init__(self, bot, autor: discord.Member):
+
+class FinalizarTorneioView(View):
+    def __init__(self, bot, autor: discord.Member, participantes, formato: str):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.autor = autor
+        self.participantes = participantes
+        self.formato = formato
+        self.classificacao = {}  # {posicao: user_id}
+
+        num_participantes = len(participantes)
+
+        # Adicionar selects baseado no número de participantes
+        if num_participantes >= 1:
+            self.add_item(ClassificacaoSelect(1, participantes, "🥇 1º Lugar (Campeão)"))
+        if num_participantes >= 2:
+            self.add_item(ClassificacaoSelect(2, participantes, "🥈 2º Lugar (Vice)"))
+        if num_participantes >= 3:
+            self.add_item(ClassificacaoSelect(3, participantes, "🥉 3º Lugar"))
+        if num_participantes >= 4:
+            self.add_item(ClassificacaoSelect(4, participantes, "4️⃣ 4º Lugar"))
+
+    @discord.ui.button(label="Confirmar Classificação", style=discord.ButtonStyle.green, emoji="✅", row=4)
+    async def confirmar(self, interaction: discord.Interaction, button: Button):
+        # Verificar permissão
+        guild_config = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
+        if guild_config:
+            if interaction.user.id != self.autor.id and not interaction.user.get_role(guild_config.perm_cmd_role_id):
+                failed = Embed(
+                    title=f"{emojis.FAILED} | Sem permissão!",
+                    description=f"Apenas {self.autor.mention} ou membros com permissão podem finalizar.",
+                    color=discord.Color.red()
+                )
+                return await interaction.response.send_message(embed=failed, ephemeral=True)
+
+        # Coletar seleções dos selects
+        classificacao_temp = {}
+        for child in self.children:
+            if isinstance(child, ClassificacaoSelect) and child.values:
+                classificacao_temp[child.posicao] = int(child.values[0])
+
+        # Validar se todas as posições foram preenchidas
+        num_participantes = len(self.participantes)
+        if len(classificacao_temp) < num_participantes:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Classificação incompleta!",
+                description=f"Selecione a posição de todos os {num_participantes} participantes.",
+                color=discord.Color.red()
+            )
+            return await interaction.response.send_message(embed=failed, ephemeral=True)
+
+        # Validar se não há duplicatas
+        if len(set(classificacao_temp.values())) != len(classificacao_temp):
+            failed = Embed(
+                title=f"{emojis.FAILED} | Jogadores duplicados!",
+                description="Você selecionou o mesmo jogador em posições diferentes.",
+                color=discord.Color.red()
+            )
+            return await interaction.response.send_message(embed=failed, ephemeral=True)
+
+        # Abrir modal para pedir valor
+        await interaction.response.send_modal(
+            FinalizarTorneioValorModal(self.bot, self.autor, self.participantes, self.formato, classificacao_temp)
+        )
+
+
+class FinalizarTorneioValorModal(Modal, title="Valor da Partida"):
+    valor = TextInput(
+        label="Valor da Partida",
+        placeholder="Ex: 15000",
+        required=True,
+        style=discord.TextStyle.short
+    )
+
+    def __init__(self, bot, autor, participantes, formato, classificacao):
         super().__init__(timeout=None)
         self.bot = bot
         self.autor = autor
+        self.participantes = participantes
+        self.formato = formato
+        self.classificacao = classificacao  # {posicao: user_id}
 
-    @discord.ui.button(label="Finalizar Matchmaking", style=discord.ButtonStyle.red, emoji=emojis.FAILED, custom_id="finalizar_matchmaking")
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            valor_partida = int(self.valor.value)
+        except:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Valor inválido!",
+                description="O valor precisa ser um número.",
+                color=discord.Color.red()
+            )
+            return await interaction.followup.send(embed=failed, ephemeral=True)
+
+        # Processar finalização
+        resultado = await functions.finalizar_torneio(
+            session,
+            self.autor.id,
+            self.classificacao,
+            self.participantes,
+            self.formato,
+            valor_partida
+        )
+
+        if resultado['sucesso']:
+            # Criar embed de resultado
+            embed = Embed(
+                title=f"🏆 Torneio Finalizado - {self.formato}",
+                description=f"**Organizador:** {self.autor.mention}\n",
+                color=discord.Color.gold()
+            )
+
+            for pos, dados in sorted(resultado['resultados'].items()):
+                emoji = {1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣"}.get(pos, f"{pos}º")
+                user = discord.utils.get(interaction.guild.members, id=dados['user_id'])
+
+                delta = dados['delta_mmr']
+                sinal = "+" if delta >= 0 else ""
+
+                embed.add_field(
+                    name=f"{emoji} {pos}º Lugar",
+                    value=f"{user.mention}\n{sinal}{delta} MMR → **{dados['mmr_novo']} MMR**",
+                    inline=True
+                )
+
+            embed.add_field(
+                name="💰 Valor Total",
+                value=f"{valor_partida * len(self.participantes):,}".replace(',', '.'),
+                inline=False
+            )
+
+            embed.set_footer(text=f"Organizado por {self.autor.name}", icon_url=self.autor.display_avatar.url)
+
+            await interaction.followup.send(embed=embed)
+
+            # Limpar participantes
+            participantes_db = session.query(MatchParticipantes).filter_by(autor_id=self.autor.id).all()
+            for part in participantes_db:
+                session.delete(part)
+            session.commit()
+
+        else:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Erro ao finalizar!",
+                description=f"```{resultado['erro']}```",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=failed, ephemeral=True)
+
+
+class FinalizarMatchmaking(View):
+    def __init__(self, bot, autor: discord.Member, participantes_data=None, formato="1x1"):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.autor = autor
+        self.participantes_data = participantes_data
+        self.formato = formato
+
+    @discord.ui.button(label="Finalizar Torneio", style=discord.ButtonStyle.green, emoji="🏆", custom_id="finalizar_torneio_v2")
     async def finalizar(self, interaction: discord.Interaction, btn: Button):
+        # Verificar permissão
         guild = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
         if guild:
             perm_role = interaction.guild.get_role(guild.perm_cmd_role_id)
-            if interaction.user.id == self.autor.id or interaction.user.get_role(guild.perm_cmd_role_id):
-                await interaction.response.send_modal(FinalizarConfig(self.bot, self.autor))
-            else:
+            if interaction.user.id != self.autor.id and not interaction.user.get_role(guild.perm_cmd_role_id):
                 failed = Embed(
                     title=f"{emojis.FAILED} | Você não possui permissão!",
                     description=f"**Apenas: {self.autor.mention} ou pessoas com o cargo: {perm_role.mention}, podem usar esse botão**",
                     color=discord.Color.red()
                 )
-                await interaction.response.send_message(embed=failed, ephemeral=True)
+                return await interaction.response.send_message(embed=failed, ephemeral=True)
         else:
-            failed = Embed(
-                title=f"{emojis.FAILED} | O servidor não está registrado!",
-                color=discord.Color.red()
-            )
-            await interaction.response.send_message(embed=failed, ephemeral=True)
-
-class Finalizar(View):
-    def __init__(self, bot, autor: discord.Member, bll_value):
-        super().__init__(timeout=None)
-        self.bot = bot
-        self.autor = autor
-        self.bll_value = bll_value
-
-    @discord.ui.button(label="Finalizar Partida", style=discord.ButtonStyle.green, emoji=emojis.SUCESS, custom_id="finalizar_partida")
-    async def finalizar_partida(self, interaction: discord.Interaction, btn: Button):
-        process = functions.processar_matchmaking(session, self.autor.id, self.bll_value)
-        if process:
-            sucess = Embed(
-                title=f"{emojis.SUCESS} | Partida finalizada e valores entregues!",
-                color=discord.Color.green()
-            )
-            await interaction.response.send_message(embed=sucess, ephemeral=True)
-            participantes = session.query(MatchParticipantes).filter_by(autor_id=self.autor.id).all()
-            for part in participantes:
-                session.delete(part)
-                session.commit()
-        else:
-            Erro = Embed(
-                title=f"{emojis.FAILED} | Error: **{process}**",
-                color=discord.Color.red()
-            )
-            await interaction.response.send_message(embed=Erro, ephemeral=True)
-
-    @discord.ui.button(label="Finalizar Batalha", style=discord.ButtonStyle.red, emoji=emojis.FAILED, custom_id="finalizar_batalha")
-    async def finalizar_batalha(self, interaction: discord.Interaction, btn: Button):
-        guild = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
-        if not guild:
             failed = Embed(
                 title=f"{emojis.FAILED} | O servidor não está registrado!",
                 color=discord.Color.red()
             )
             return await interaction.response.send_message(embed=failed, ephemeral=True)
-        
-        process = await functions.finalizar_batalha(interaction, session, self.autor.id, self.bll_value, guild.confronto_channel_id)
-        if process[0] == True:
-            channel = interaction.guild.get_channel(guild.confronto_channel_id)
-            sucess = Embed(
-                title=f"{emojis.SUCESS} | Detalhes do confronto, enviado em: {channel.mention}",
-                color=discord.Color.green()
-            )
-            await interaction.response.send_message(embed=sucess, ephemeral=True)
-        else:
-            Erro = Embed(
-                title=f"{emojis.FAILED} | Error: **{process[0]}**",
+
+        # Buscar participantes do torneio
+        participantes_db = session.query(MatchParticipantes).filter_by(autor_id=self.autor.id).all()
+
+        if not participantes_db:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Nenhum participante encontrado!",
+                description="Não há participantes registrados neste torneio.",
                 color=discord.Color.red()
             )
-            await interaction.response.send_message(embed=Erro, ephemeral=True)
+            return await interaction.response.send_message(embed=failed, ephemeral=True)
 
+        # Buscar dados completos dos participantes
+        participantes = []
+        for p in participantes_db:
+            user_db = session.query(Users).filter_by(discord_id=p.discord_id).first()
+            if user_db:
+                user = interaction.guild.get_member(p.discord_id)
+                if user:
+                    participantes.append({
+                        'user': user,
+                        'mmr': user_db.MRR
+                    })
 
+        if not participantes:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Erro ao carregar participantes!",
+                color=discord.Color.red()
+            )
+            return await interaction.response.send_message(embed=failed, ephemeral=True)
+
+        # Mostrar view de classificação
+        view = FinalizarTorneioView(self.bot, self.autor, participantes, self.formato)
+
+        embed = Embed(
+            title="📋 Classificar Participantes",
+            description=(
+                f"**Torneio:** {self.formato}\n"
+                f"**Participantes:** {len(participantes)}\n\n"
+                "Selecione a posição final de cada jogador nos dropdowns abaixo:"
+            ),
+            color=discord.Color.blurple()
+        )
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
