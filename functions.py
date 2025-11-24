@@ -89,13 +89,13 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
     # Ordenar por peso (VIPs mais prioritários primeiro)
     jogadores_com_peso.sort(key=lambda x: x[1], reverse=True)
 
-    # Selecionar apenas múltiplos de jogadores_por_partida
-    # Exemplo: 20 pessoas, partida 2x2 (4 por partida) → 20 // 4 = 5 partidas → 5 * 4 = 20 pessoas
-    # Exemplo: 18 pessoas, partida 2x2 (4 por partida) → 18 // 4 = 4 partidas → 4 * 4 = 16 pessoas
-    multiplo_max = (len(jogadores_com_peso) // jogadores_por_partida) * jogadores_por_partida
-    jogadores_selecionados = [j for j, _ in jogadores_com_peso[:multiplo_max]]
+    # Selecionar apenas o número exato de vagas do torneio
+    # Para 1x1: vagas = jogadores (ex: 4 vagas = 4 jogadores)
+    # Para 2x2: vagas = equipes (ex: 4 vagas = 8 jogadores)
+    # Para 3x3: vagas = equipes (ex: 4 vagas = 12 jogadores)
+    jogadores_selecionados = [j for j, _ in jogadores_com_peso[:total_pessoas_necessarias]]
 
-    if len(jogadores_selecionados) < jogadores_por_partida:
+    if len(jogadores_selecionados) < total_pessoas_necessarias:
         texto_formato = f"{vagas} vagas ({total_pessoas_necessarias} pessoas)" if formato != "1x1" else f"{vagas} jogadores"
         embed = discord.Embed(
             title="❌ Jogadores insuficientes!",
@@ -121,7 +121,6 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
 
 def sortear_partidas(jogadores_discord, formato: str):
     jogadores_por_time = int(formato.split("x")[0])
-    jogadores_por_partida = jogadores_por_time * 2
 
     jogadores_com_mmr = []
 
@@ -137,40 +136,61 @@ def sortear_partidas(jogadores_discord, formato: str):
     # Ordena por MMR (maior para menor) - SEM shuffle global
     jogadores_ordenados = sorted(jogadores_com_mmr, key=lambda j: j["mmr"], reverse=True)
 
-    partidas = []
+    # Embaralha para confrontos aleatórios
+    random.shuffle(jogadores_ordenados)
 
-    # Distribui jogadores em partidas baseado em MMR
-    # Partida 1: 8 melhores MMR, Partida 2: 8 piores MMR, etc.
-    for i in range(0, len(jogadores_ordenados), jogadores_por_partida):
-        grupo = jogadores_ordenados[i:i+jogadores_por_partida]
-        if len(grupo) < jogadores_por_partida:
-            break  # Não tem jogadores suficientes para formar uma nova partida
+    # Criar confrontos do torneio
+    # Para 1x1: cada confronto tem 2 jogadores
+    # Para 2x2: cada confronto tem 2 equipes de 2 jogadores (4 pessoas)
+    # Para 3x3: cada confronto tem 2 equipes de 3 jogadores (6 pessoas)
+    confrontos = []
+    jogadores_por_confronto = jogadores_por_time * 2
 
-        # Embaralha APENAS dentro desta partida para confrontos aleatórios
-        random.shuffle(grupo)
+    for i in range(0, len(jogadores_ordenados), jogadores_por_confronto):
+        grupo = jogadores_ordenados[i:i+jogadores_por_confronto]
+        if len(grupo) < jogadores_por_confronto:
+            break
 
         time1 = grupo[:jogadores_por_time]
         time2 = grupo[jogadores_por_time:]
 
-        partidas.append((time1, time2))
+        confrontos.append((time1, time2))
 
-    return partidas
+    return confrontos
 
 def gerar_embed_partidas(partidas, formato, tipo_evento):
+    # Determinar nome da rodada baseado no número de confrontos
+    num_confrontos = len(partidas)
+    if num_confrontos == 1:
+        rodada_nome = "Final"
+    elif num_confrontos == 2:
+        rodada_nome = "Semifinal"
+    elif num_confrontos == 4:
+        rodada_nome = "Quartas de Final"
+    elif num_confrontos == 8:
+        rodada_nome = "Oitavas de Final"
+    else:
+        rodada_nome = f"Rodada 1 ({num_confrontos} confrontos)"
+
     embed = Embed(
-        title="⚔️ Confrontos Gerados",
-        description=f"**Formato:** `{formato}` | **Evento:** `{tipo_evento}`\n",
+        title=f"⚔️ {rodada_nome} - Torneio {formato}",
+        description=f"**Evento:** `{tipo_evento.capitalize()}`\n",
         color=0x2F3136
     )
 
     for idx, (time1, time2) in enumerate(partidas, start=1):
         def formatar_time(time):
-            return " & ".join(f"<@{j['user'].id}> ({j['mmr']})" for j in time)
+            if len(time) == 1:
+                # 1x1: apenas o jogador
+                return f"<@{time[0]['user'].id}> ({time[0]['mmr']} MMR)"
+            else:
+                # 2x2 ou 3x3: equipe
+                return " & ".join(f"<@{j['user'].id}> ({j['mmr']})" for j in time)
 
         t1 = formatar_time(time1)
         t2 = formatar_time(time2)
 
-        embed.add_field(name=f"Partida {idx}", value=f"{t1} **vs** {t2}", inline=False)
+        embed.add_field(name=f"Batalha {idx}", value=f"{t1}\n**VS**\n{t2}", inline=False)
 
     return embed
 
