@@ -78,14 +78,26 @@ class FinalizarTorneioView(View):
         num_participantes = len(participantes)
 
         # Adicionar selects baseado no número de participantes
-        if num_participantes >= 1:
-            self.add_item(ClassificacaoSelect(1, participantes, "🥇 1º Lugar (Campeão)"))
-        if num_participantes >= 2:
-            self.add_item(ClassificacaoSelect(2, participantes, "🥈 2º Lugar (Vice)"))
-        if num_participantes >= 3:
-            self.add_item(ClassificacaoSelect(3, participantes, "🥉 3º Lugar"))
-        if num_participantes >= 4:
-            self.add_item(ClassificacaoSelect(4, participantes, "4️⃣ 4º Lugar"))
+        emojis_posicoes = {
+            1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣",
+            5: "5️⃣", 6: "6️⃣", 7: "7️⃣", 8: "8️⃣",
+            9: "9️⃣", 10: "🔟", 11: "1️⃣1️⃣", 12: "1️⃣2️⃣",
+            13: "1️⃣3️⃣", 14: "1️⃣4️⃣", 15: "1️⃣5️⃣", 16: "1️⃣6️⃣"
+        }
+
+        nomes_posicoes = {
+            1: "1º Lugar (Campeão)",
+            2: "2º Lugar (Vice)",
+            3: "3º Lugar",
+            4: "4º Lugar"
+        }
+
+        # Adicionar um select para cada posição
+        for posicao in range(1, num_participantes + 1):
+            emoji = emojis_posicoes.get(posicao, f"{posicao}️⃣")
+            nome = nomes_posicoes.get(posicao, f"{posicao}º Lugar")
+            placeholder = f"{emoji} {nome}"
+            self.add_item(ClassificacaoSelect(posicao, participantes, placeholder))
 
     @discord.ui.button(label="Confirmar Classificação", style=discord.ButtonStyle.green, emoji="✅", row=4)
     async def confirmar(self, interaction: discord.Interaction, button: Button):
@@ -148,8 +160,15 @@ class FinalizarTorneioView(View):
                 color=discord.Color.gold()
             )
 
+            emojis_posicoes = {
+                1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣",
+                5: "5️⃣", 6: "6️⃣", 7: "7️⃣", 8: "8️⃣",
+                9: "9️⃣", 10: "🔟", 11: "1️⃣1️⃣", 12: "1️⃣2️⃣",
+                13: "1️⃣3️⃣", 14: "1️⃣4️⃣", 15: "1️⃣5️⃣", 16: "1️⃣6️⃣"
+            }
+
             for pos, dados in sorted(resultado['resultados'].items()):
-                emoji = {1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣"}.get(pos, f"{pos}º")
+                emoji = emojis_posicoes.get(pos, f"{pos}º")
                 user = discord.utils.get(interaction.guild.members, id=dados['user_id'])
 
                 delta = dados['delta_mmr']
@@ -163,7 +182,20 @@ class FinalizarTorneioView(View):
 
             embed.set_footer(text=f"Organizado por {self.autor.name}", icon_url=self.autor.display_avatar.url)
 
-            await interaction.followup.send(embed=embed)
+            # Enviar no canal de confrontos configurado
+            guild_config = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
+            if guild_config and guild_config.confronto_channel_id:
+                confronto_channel = interaction.guild.get_channel(guild_config.confronto_channel_id)
+                if confronto_channel:
+                    await confronto_channel.send(embed=embed)
+
+            # Enviar confirmação ephemeral
+            success_msg = Embed(
+                title=f"{emojis.SUCESS} | Torneio finalizado com sucesso!",
+                description="Os resultados foram enviados no canal de confrontos.",
+                color=discord.Color.green()
+            )
+            await interaction.followup.send(embed=success_msg, ephemeral=True)
 
             # Limpar participantes
             participantes_db = session.query(MatchParticipantes).filter_by(autor_id=self.autor.id).all()
@@ -229,8 +261,15 @@ class FinalizarTorneioValorModal(Modal, title="Valor da Partida"):
                 color=discord.Color.gold()
             )
 
+            emojis_posicoes = {
+                1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣",
+                5: "5️⃣", 6: "6️⃣", 7: "7️⃣", 8: "8️⃣",
+                9: "9️⃣", 10: "🔟", 11: "1️⃣1️⃣", 12: "1️⃣2️⃣",
+                13: "1️⃣3️⃣", 14: "1️⃣4️⃣", 15: "1️⃣5️⃣", 16: "1️⃣6️⃣"
+            }
+
             for pos, dados in sorted(resultado['resultados'].items()):
-                emoji = {1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣"}.get(pos, f"{pos}º")
+                emoji = emojis_posicoes.get(pos, f"{pos}º")
                 user = discord.utils.get(interaction.guild.members, id=dados['user_id'])
 
                 delta = dados['delta_mmr']
