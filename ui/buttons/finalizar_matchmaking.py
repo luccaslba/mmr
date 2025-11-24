@@ -216,11 +216,11 @@ class FinalizarTorneioValorModal(Modal, title="Valor da Partida"):
 
 
 class FinalizarMatchmaking(View):
-    def __init__(self, bot, autor: discord.Member, participantes_data=None, formato="1x1"):
+    def __init__(self, bot, autor: discord.Member, jogadores_sorteados_ids=None, formato="1x1"):
         super().__init__(timeout=None)
         self.bot = bot
         self.autor = autor
-        self.participantes_data = participantes_data
+        self.jogadores_sorteados_ids = jogadores_sorteados_ids or []
         self.formato = formato
 
     @discord.ui.button(label="Finalizar Torneio", style=discord.ButtonStyle.green, emoji="🏆", custom_id="finalizar_torneio_v2")
@@ -243,23 +243,21 @@ class FinalizarMatchmaking(View):
             )
             return await interaction.response.send_message(embed=failed, ephemeral=True)
 
-        # Buscar participantes do torneio
-        participantes_db = session.query(MatchParticipantes).filter_by(autor_id=self.autor.id).all()
-
-        if not participantes_db:
+        # Buscar apenas os participantes que foram SORTEADOS
+        if not self.jogadores_sorteados_ids:
             failed = Embed(
-                title=f"{emojis.FAILED} | Nenhum participante encontrado!",
-                description="Não há participantes registrados neste torneio.",
+                title=f"{emojis.FAILED} | Erro ao carregar participantes!",
+                description="Lista de jogadores sorteados não encontrada.",
                 color=discord.Color.red()
             )
             return await interaction.response.send_message(embed=failed, ephemeral=True)
 
-        # Buscar dados completos dos participantes
+        # Buscar dados completos apenas dos jogadores sorteados
         participantes = []
-        for p in participantes_db:
-            user_db = session.query(Users).filter_by(discord_id=p.discord_id).first()
+        for user_id in self.jogadores_sorteados_ids:
+            user_db = session.query(Users).filter_by(discord_id=user_id).first()
             if user_db:
-                user = interaction.guild.get_member(p.discord_id)
+                user = interaction.guild.get_member(user_id)
                 if user:
                     participantes.append({
                         'user': user,

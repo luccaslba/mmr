@@ -116,7 +116,11 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
     # Prosseguir com matchmaking com jogadores selecionados
     partidas = sortear_partidas(jogadores_selecionados, formato)
     embed = gerar_embed_partidas(partidas, formato, tipo_evento)
-    await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor))
+
+    # Extrair lista de user IDs dos jogadores sorteados
+    jogadores_sorteados_ids = [jogador.id for jogador in jogadores_selecionados]
+
+    await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor, jogadores_sorteados_ids, formato))
 
 
 def sortear_partidas(jogadores_discord, formato: str):
