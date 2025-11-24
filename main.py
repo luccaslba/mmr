@@ -32,6 +32,18 @@ async def sync(ctx: commands.Context):
         await ctx.reply(embed=e)
 
 @bot.command()
+async def clearsync(ctx: commands.Context):
+    if ctx.author.id == config_bot.OWNER_ID:
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()
+        s = await bot.tree.sync()
+        e = discord.Embed(
+            title=f"Comandos limpos e re-sincronizados: {len(s)}",
+            color=discord.Color.green()
+        )
+        await ctx.reply(embed=e)
+
+@bot.command()
 async def teste(ctx: commands.Context):
     if ctx.author.id == config_bot.OWNER_ID:
         user = bot.get_user(config_bot.OWNER_ID)
