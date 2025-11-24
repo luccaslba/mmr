@@ -8,8 +8,8 @@ class Config(Cog):
         self.bot = bot
 
     @app_commands.command(description="Configurar o bot")
-    @app_commands.describe(mrr_channel="O canal que será enviado o MRR", matchmaking_channel="O canal que será enviado os matchmaking", perm_cmd="Cargo que terá permissão para usar os comandos", match_close_count="A quantidade de MMR necessario para um matchmaking fechado")
-    async def config(self, interact: discord.Interaction, mrr_channel: discord.TextChannel, matchmaking_channel: discord.TextChannel, perm_cmd: discord.Role, match_close_count: int, confronto_channel: discord.TextChannel):
+    @app_commands.describe(mrr_channel="O canal que será enviado o MRR", matchmaking_channel="O canal que será enviado os matchmaking", perm_cmd="Cargo que terá permissão para usar os comandos", match_close_count="A quantidade de MMR necessario para um matchmaking fechado", bdf_role="Cargo necessário para criar eventos BDF (opcional)")
+    async def config(self, interact: discord.Interaction, mrr_channel: discord.TextChannel, matchmaking_channel: discord.TextChannel, perm_cmd: discord.Role, match_close_count: int, confronto_channel: discord.TextChannel, bdf_role: discord.Role = None):
         await interact.response.defer(ephemeral=True)
         load = Embed(
             description=f" {emojis.LOADING} | Carregando... ",
@@ -18,11 +18,13 @@ class Config(Cog):
         await interact.edit_original_response(embed=load)
 
         await sleep(2)
-        if interact.user.id == config_bot.OWNER_ID: 
+        if interact.user.id == config_bot.OWNER_ID:
             guild = db.session.query(db.Guild_Config).filter_by(guild_id=interact.guild.id).first()
+            bdf_role_id = bdf_role.id if bdf_role else None
+
             if not guild:
-                        
-                add_guild = db.Guild_Config(interact.guild.id, interact.guild.name, mrr_channel.id, matchmaking_channel.id, perm_cmd.id, match_close_count, confronto_channel.id)
+
+                add_guild = db.Guild_Config(interact.guild.id, interact.guild.name, mrr_channel.id, matchmaking_channel.id, perm_cmd.id, match_close_count, confronto_channel.id, bdf_role_id)
                 db.session.add(add_guild)
                 db.session.commit()
 
@@ -30,8 +32,10 @@ class Config(Cog):
                     title=f"{emojis.SUCESS} | Servidor configurado com sucesso!",
                     color=discord.Color.green()
                 )
+                if bdf_role:
+                    sucess.add_field(name="Cargo BDF", value=f"{bdf_role.mention} configurado para eventos BDF", inline=False)
                 await interact.edit_original_response(embed=sucess)
-           
+
             else:
                 guild.guild_id = interact.guild.id
                 guild.guild_name = interact.guild.name
@@ -40,6 +44,7 @@ class Config(Cog):
                 guild.perm_cmd_role_id = perm_cmd.id
                 guild.match_close_count = match_close_count
                 guild.confronto_channel_id = confronto_channel.id
+                guild.bdf_role_id = bdf_role_id
 
                 db.session.add(guild)
                 db.session.commit()
@@ -48,6 +53,8 @@ class Config(Cog):
                     title=f"{emojis.SUCESS} | Configurado com sucesso!",
                     color=discord.Color.green()
                 )
+                if bdf_role:
+                    sucess.add_field(name="Cargo BDF", value=f"{bdf_role.mention} configurado para eventos BDF", inline=False)
                 await interact.edit_original_response(embed=sucess)
 
         else:

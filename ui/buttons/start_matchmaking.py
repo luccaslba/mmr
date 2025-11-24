@@ -254,6 +254,19 @@ class TipoEventoSelect(Select):
     async def callback(self, interaction: discord.Interaction):
         tipo_evento = self.values[0]
 
+        # Verificar permissão para BDF
+        if tipo_evento == "bdf":
+            config = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
+            if config and config.bdf_role_id:
+                bdf_role = interaction.guild.get_role(config.bdf_role_id)
+                if bdf_role and bdf_role not in interaction.user.roles:
+                    failure = Embed(
+                        title=f"{emojis.FAILED} | Permissão negada!",
+                        description=f"Você precisa do cargo {bdf_role.mention} para criar eventos BDF.",
+                        color=discord.Color.red()
+                    )
+                    return await interaction.response.send_message(embed=failure, ephemeral=True)
+
         # Abrir modal para data/horário
         await interaction.response.send_modal(
             DataHorarioModal(self.bot, self.formato, self.vagas, tipo_evento)
