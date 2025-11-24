@@ -5,7 +5,7 @@ from db import session, Users, Guild_Config, CloseMatchMember, MatchParticipante
 from discord import Embed
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
 
-async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, formato, vagas, tipo_evento, datahora, autor):
+async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, formato, vagas, tipo_evento, datahora, autor, modo_sorteio="unico"):
 
     # Ajuste para timezone aware (horário de Brasília)
     now = datetime.now(pytz.timezone("America/Sao_Paulo"))
@@ -89,11 +89,23 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
     # Ordenar por peso (VIPs mais prioritários primeiro)
     jogadores_com_peso.sort(key=lambda x: x[1], reverse=True)
 
-    # Selecionar apenas o número exato de vagas do torneio
-    # Para 1x1: vagas = jogadores (ex: 4 vagas = 4 jogadores)
-    # Para 2x2: vagas = equipes (ex: 4 vagas = 8 jogadores)
-    # Para 3x3: vagas = equipes (ex: 4 vagas = 12 jogadores)
-    jogadores_selecionados = [j for j, _ in jogadores_com_peso[:total_pessoas_necessarias]]
+    # Selecionar jogadores baseado no modo de sorteio
+    if modo_sorteio == "multiplo":
+        # Sorteio Múltiplo: sortear vários torneios se houver inscritos suficientes
+        # Calcula quantos torneios completos podem ser formados
+        multiplo_max = (len(jogadores_com_peso) // total_pessoas_necessarias) * total_pessoas_necessarias
+        jogadores_selecionados = [j for j, _ in jogadores_com_peso[:multiplo_max]]
+        print(f"[Matchmaking] Modo: MÚLTIPLO - Sorteando {multiplo_max // total_pessoas_necessarias} torneio(s)")
+    else:
+        # Sorteio Único: sortear apenas 1 torneio com as vagas configuradas
+        jogadores_selecionados = [j for j, _ in jogadores_com_peso[:total_pessoas_necessarias]]
+        print(f"[Matchmaking] Modo: ÚNICO - Sorteando 1 torneio")
+
+    print(f"[Matchmaking] Total de inscritos: {len(jogadores)}")
+    print(f"[Matchmaking] Vagas do torneio: {vagas}")
+    print(f"[Matchmaking] Pessoas necessárias: {total_pessoas_necessarias}")
+    print(f"[Matchmaking] Jogadores selecionados: {len(jogadores_selecionados)}")
+    print(f"[Matchmaking] Jogadores que ficaram de fora: {len(jogadores) - len(jogadores_selecionados)}")
 
     if len(jogadores_selecionados) < total_pessoas_necessarias:
         texto_formato = f"{vagas} vagas ({total_pessoas_necessarias} pessoas)" if formato != "1x1" else f"{vagas} jogadores"
@@ -114,13 +126,31 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
         return
 
     # Prosseguir com matchmaking com jogadores selecionados
-    partidas = sortear_partidas(jogadores_selecionados, formato)
-    embed = gerar_embed_partidas(partidas, formato, tipo_evento)
+    if modo_sorteio == "multiplo" and len(jogadores_selecionados) > total_pessoas_necessarias:
+        # Dividir jogadores em grupos de torneios
+        num_torneios = len(jogadores_selecionados) // total_pessoas_necessarias
 
-    # Extrair lista de user IDs dos jogadores sorteados
-    jogadores_sorteados_ids = [jogador.id for jogador in jogadores_selecionados]
+        for i in range(num_torneios):
+            inicio = i * total_pessoas_necessarias
+            fim = inicio + total_pessoas_necessarias
+            grupo_jogadores = jogadores_selecionados[inicio:fim]
 
-    await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor, jogadores_sorteados_ids, formato))
+            partidas = sortear_partidas(grupo_jogadores, formato)
+            embed = gerar_embed_partidas(partidas, formato, tipo_evento, numero_torneio=i+1, total_torneios=num_torneios)
+
+            # Extrair lista de user IDs dos jogadores deste torneio
+            jogadores_sorteados_ids = [jogador.id for jogador in grupo_jogadores]
+
+            await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor, jogadores_sorteados_ids, formato))
+    else:
+        # Sorteio único (modo padrão)
+        partidas = sortear_partidas(jogadores_selecionados, formato)
+        embed = gerar_embed_partidas(partidas, formato, tipo_evento)
+
+        # Extrair lista de user IDs dos jogadores sorteados
+        jogadores_sorteados_ids = [jogador.id for jogador in jogadores_selecionados]
+
+        await channel.send(embed=embed, view=FinalizarMatchmaking(bot, autor, jogadores_sorteados_ids, formato))
 
 
 def sortear_partidas(jogadores_discord, formato: str):
@@ -162,7 +192,7 @@ def sortear_partidas(jogadores_discord, formato: str):
 
     return confrontos
 
-def gerar_embed_partidas(partidas, formato, tipo_evento):
+def gerar_embed_partidas(partidas, formato, tipo_evento, numero_torneio=None, total_torneios=None):
     # Determinar nome da rodada baseado no número de confrontos
     num_confrontos = len(partidas)
     if num_confrontos == 1:
@@ -176,9 +206,17 @@ def gerar_embed_partidas(partidas, formato, tipo_evento):
     else:
         rodada_nome = f"Rodada 1 ({num_confrontos} confrontos)"
 
+    # Adicionar número do torneio se for modo múltiplo
+    if numero_torneio and total_torneios and total_torneios > 1:
+        titulo = f"⚔️ {rodada_nome} - Torneio {formato} [{numero_torneio}/{total_torneios}]"
+        descricao = f"**Evento:** `{tipo_evento.capitalize()}`\n**Torneio:** `{numero_torneio} de {total_torneios}`\n"
+    else:
+        titulo = f"⚔️ {rodada_nome} - Torneio {formato}"
+        descricao = f"**Evento:** `{tipo_evento.capitalize()}`\n"
+
     embed = Embed(
-        title=f"⚔️ {rodada_nome} - Torneio {formato}",
-        description=f"**Evento:** `{tipo_evento.capitalize()}`\n",
+        title=titulo,
+        description=descricao,
         color=0x2F3136
     )
 

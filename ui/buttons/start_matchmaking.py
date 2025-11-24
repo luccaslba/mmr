@@ -19,12 +19,13 @@ class DataHorarioModal(Modal, title="Data e Horário do Evento"):
         style=discord.TextStyle.short
     )
 
-    def __init__(self, bot, formato: str, vagas: int, tipo_evento: str):
+    def __init__(self, bot, formato: str, vagas: int, tipo_evento: str, modo_sorteio: str):
         super().__init__(timeout=None)
         self.bot = bot
         self.formato = formato
         self.vagas = vagas
         self.tipo_evento = tipo_evento
+        self.modo_sorteio = modo_sorteio
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -111,7 +112,8 @@ class DataHorarioModal(Modal, title="Data e Horário do Evento"):
                 self.vagas,
                 self.tipo_evento,
                 datahora,
-                interaction.user
+                interaction.user,
+                self.modo_sorteio
             ))
 
         await interaction.followup.send(
@@ -141,7 +143,7 @@ class FormatoSelect(Select):
         view = VagasView(self.bot, self.values[0])
 
         embed = Embed(
-            title="⚙️ Configurar Matchmaking - Passo 2/4",
+            title="⚙️ Configurar Matchmaking - Passo 2/5",
             description=f"✅ **Formato selecionado:** `{self.values[0]}`\n\nAgora selecione a quantidade de vagas:",
             color=discord.Color.blurple()
         )
@@ -200,13 +202,60 @@ class VagasSelect(Select):
 
     async def callback(self, interaction: discord.Interaction):
         vagas = int(self.values[0])
-        view = TipoEventoView(self.bot, self.formato, vagas)
+        view = ModoSorteioView(self.bot, self.formato, vagas)
 
         embed = Embed(
-            title="⚙️ Configurar Matchmaking - Passo 3/4",
+            title="⚙️ Configurar Matchmaking - Passo 3/5",
             description=(
                 f"✅ **Formato:** `{self.formato}`\n"
                 f"✅ **Vagas:** `{vagas}`\n\n"
+                f"Agora selecione o modo de sorteio:"
+            ),
+            color=discord.Color.blurple()
+        )
+
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+# Select Menu para Modo de Sorteio
+class ModoSorteioSelect(Select):
+    def __init__(self, bot, formato: str, vagas: int):
+        self.bot = bot
+        self.formato = formato
+        self.vagas = vagas
+
+        options = [
+            discord.SelectOption(
+                label="Sorteio Único",
+                value="unico",
+                emoji="🎯",
+                description="Sorteia apenas 1 torneio com as vagas configuradas"
+            ),
+            discord.SelectOption(
+                label="Sorteio Múltiplo",
+                value="multiplo",
+                emoji="🎲",
+                description="Sorteia vários torneios se houver inscritos suficientes"
+            ),
+        ]
+        super().__init__(
+            placeholder="🎲 Selecione o modo de sorteio",
+            options=options,
+            custom_id="modo_sorteio_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        modo_sorteio = self.values[0]
+        view = TipoEventoView(self.bot, self.formato, self.vagas, modo_sorteio)
+
+        modo_texto = "🎯 Único (1 torneio)" if modo_sorteio == "unico" else "🎲 Múltiplo (vários torneios)"
+
+        embed = Embed(
+            title="⚙️ Configurar Matchmaking - Passo 4/5",
+            description=(
+                f"✅ **Formato:** `{self.formato}`\n"
+                f"✅ **Vagas:** `{self.vagas}`\n"
+                f"✅ **Modo de Sorteio:** `{modo_texto}`\n\n"
                 f"Agora selecione o tipo de evento:"
             ),
             color=discord.Color.blurple()
@@ -217,10 +266,11 @@ class VagasSelect(Select):
 
 # Select Menu para Tipo de Evento
 class TipoEventoSelect(Select):
-    def __init__(self, bot, formato: str, vagas: int):
+    def __init__(self, bot, formato: str, vagas: int, modo_sorteio: str):
         self.bot = bot
         self.formato = formato
         self.vagas = vagas
+        self.modo_sorteio = modo_sorteio
 
         config = session.query(Guild_Config).first()
         mmr_minimo = config.match_close_count if config else 100
@@ -269,7 +319,7 @@ class TipoEventoSelect(Select):
 
         # Abrir modal para data/horário
         await interaction.response.send_modal(
-            DataHorarioModal(self.bot, self.formato, self.vagas, tipo_evento)
+            DataHorarioModal(self.bot, self.formato, self.vagas, tipo_evento, self.modo_sorteio)
         )
 
 
@@ -300,7 +350,7 @@ class VagasView(View):
     async def voltar(self, interaction: discord.Interaction, button: Button):
         view = FormatoView(self.bot)
         embed = Embed(
-            title="⚙️ Configurar Matchmaking - Passo 1/4",
+            title="⚙️ Configurar Matchmaking - Passo 1/5",
             description="Selecione o formato da partida:",
             color=discord.Color.blurple()
         )
@@ -315,20 +365,52 @@ class VagasView(View):
         )
 
 
-class TipoEventoView(View):
+class ModoSorteioView(View):
     def __init__(self, bot, formato: str, vagas: int):
         super().__init__(timeout=180)
         self.bot = bot
         self.formato = formato
         self.vagas = vagas
-        self.add_item(TipoEventoSelect(bot, formato, vagas))
+        self.add_item(ModoSorteioSelect(bot, formato, vagas))
 
     @discord.ui.button(label="Voltar", style=discord.ButtonStyle.gray, emoji="⬅️", row=1)
     async def voltar(self, interaction: discord.Interaction, button: Button):
         view = VagasView(self.bot, self.formato)
         embed = Embed(
-            title="⚙️ Configurar Matchmaking - Passo 2/4",
-            description=f"✅ **Formato:** `{self.formato}`\n\nSelecione a quantidade de vagas:",
+            title="⚙️ Configurar Matchmaking - Passo 2/5",
+            description=f"✅ **Formato selecionado:** `{self.formato}`\n\nAgora selecione a quantidade de vagas:",
+            color=discord.Color.blurple()
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.red, emoji="❌", row=1)
+    async def cancelar(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.edit_message(
+            content="❌ Configuração cancelada.",
+            embed=None,
+            view=None
+        )
+
+
+class TipoEventoView(View):
+    def __init__(self, bot, formato: str, vagas: int, modo_sorteio: str):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.formato = formato
+        self.vagas = vagas
+        self.modo_sorteio = modo_sorteio
+        self.add_item(TipoEventoSelect(bot, formato, vagas, modo_sorteio))
+
+    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.gray, emoji="⬅️", row=1)
+    async def voltar(self, interaction: discord.Interaction, button: Button):
+        view = ModoSorteioView(self.bot, self.formato, self.vagas)
+        embed = Embed(
+            title="⚙️ Configurar Matchmaking - Passo 3/5",
+            description=(
+                f"✅ **Formato:** `{self.formato}`\n"
+                f"✅ **Vagas:** `{self.vagas}`\n\n"
+                f"Agora selecione o modo de sorteio:"
+            ),
             color=discord.Color.blurple()
         )
         await interaction.response.edit_message(embed=embed, view=view)
@@ -351,7 +433,7 @@ class StartMatchMakingV2(View):
     @discord.ui.button(label="Iniciar Matchmaking", style=discord.ButtonStyle.green, emoji=emojis.SUCESS, custom_id="start_matchmaking_v2")
     async def start(self, interaction: discord.Interaction, btn: Button):
         embed = Embed(
-            title="⚙️ Configurar Matchmaking - Passo 1/4",
+            title="⚙️ Configurar Matchmaking - Passo 1/5",
             description="Selecione o formato da partida:",
             color=discord.Color.blurple()
         )
