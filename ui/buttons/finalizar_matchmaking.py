@@ -93,7 +93,20 @@ class ClassificacaoSelect(Select):
                 )
                 return
 
-        # Registrar classificação (permite múltiplos na mesma posição)
+        # Calcular tamanho do time
+        tamanho_time = int(view.formato.split("x")[0])
+
+        # Verificar se a posição já está cheia
+        if posicao in view.classificacao:
+            jogadores_na_posicao = len(view.classificacao[posicao])
+            if jogadores_na_posicao >= tamanho_time:
+                await interaction.response.send_message(
+                    f"{emojis.FAILED} | Esta posição já está completa ({jogadores_na_posicao}/{tamanho_time} jogadores)!",
+                    ephemeral=True
+                )
+                return
+
+        # Registrar classificação (permite múltiplos na mesma posição apenas para times)
         # Usar uma lista para cada posição
         if posicao not in view.classificacao:
             view.classificacao[posicao] = []
