@@ -151,6 +151,65 @@ class SelecionarPosicaoView(View):
             self.add_item(btn)
 
 
+class SelecionarParticipanteDropdown(Select):
+    def __init__(self, participantes, classificacao):
+        options = []
+        for p in participantes:
+            # Verificar se já foi classificado
+            if p['user'].id not in classificacao.values():
+                options.append(discord.SelectOption(
+                    label=p['user'].name[:100],
+                    value=str(p['user'].id),
+                    description=f"MMR: {p['mmr']}"
+                ))
+
+        # Se não houver opções, adicionar uma placeholder
+        if not options:
+            options.append(discord.SelectOption(
+                label="Todos classificados",
+                value="0",
+                description="Todos os participantes já foram classificados"
+            ))
+
+        super().__init__(
+            placeholder="Selecione um participante...",
+            min_values=1,
+            max_values=1,
+            options=options[:25],  # Discord limit
+            custom_id="selecionar_participante"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "0":
+            await interaction.response.send_message(
+                f"{emojis.FAILED} | Todos os participantes já foram classificados!",
+                ephemeral=True
+            )
+            return
+
+        view: FinalizarTorneioView = self.view
+        user_id = int(self.values[0])
+
+        # Encontrar o participante
+        participante = next((p for p in view.participantes if p['user'].id == user_id), None)
+        if not participante:
+            await interaction.response.send_message(
+                f"{emojis.FAILED} | Participante não encontrado!",
+                ephemeral=True
+            )
+            return
+
+        # Armazenar o participante selecionado
+        view.participante_selecionado = user_id
+
+        # Mostrar view de seleção de posição
+        await interaction.response.send_message(
+            f"Selecione a posição para **{participante['user'].name}**:",
+            view=SelecionarPosicaoView(view),
+            ephemeral=True
+        )
+
+
 class FinalizarTorneioView(View):
     def __init__(self, bot, autor: discord.Member, participantes, formato: str, tipo_evento: str = "aberto"):
         super().__init__(timeout=300)
@@ -162,19 +221,37 @@ class FinalizarTorneioView(View):
         self.classificacao = {}  # {posicao: user_id}
         self.participante_selecionado = None  # Para armazenar o participante sendo classificado
 
-        # Adicionar botões dos participantes (max 5 por row)
-        for i, participante in enumerate(participantes):
-            row = i // 5  # 0-4 (max 5 rows)
-            if row >= 4:  # Deixar row 4 para o botão de confirmar
-                break
+        num_participantes = len(participantes)
 
-            btn = BotaoParticipante(
-                participante['user'].id,
-                participante['user'].name,
-                participante['mmr'],
-                row
-            )
-            self.add_item(btn)
+        # Se tiver até 20 participantes, usar botões
+        # Se tiver mais, usar dropdown
+        if num_participantes <= 20:
+            # Adicionar botões dos participantes (max 5 por row, 4 rows = 20 botões)
+            for i, participante in enumerate(participantes):
+                row = i // 5  # 0-4 (max 5 rows)
+                if row >= 4:  # Deixar row 4 para o botão de confirmar
+                    break
+
+                btn = BotaoParticipante(
+                    participante['user'].id,
+                    participante['user'].name,
+                    participante['mmr'],
+                    row
+                )
+                self.add_item(btn)
+        else:
+            # Para mais de 20 participantes, usar dropdown
+            dropdown = SelecionarParticipanteDropdown(participantes, self.classificacao)
+            self.add_item(dropdown)
+
+    def atualizar_dropdown(self):
+        """Atualiza o dropdown removendo participantes já classificados"""
+        if len(self.participantes) > 20:
+            # Remover dropdown antigo
+            self.children = [child for child in self.children if not isinstance(child, SelecionarParticipanteDropdown)]
+            # Adicionar dropdown atualizado
+            dropdown = SelecionarParticipanteDropdown(self.participantes, self.classificacao)
+            self.add_item(dropdown)
 
     @discord.ui.button(label="Confirmar Classificação", style=discord.ButtonStyle.green, emoji="✅", row=4)
     async def confirmar(self, interaction: discord.Interaction, button: Button):
@@ -429,16 +506,30 @@ class FinalizarMatchmaking(View):
         # Mostrar view de classificação
         view = FinalizarTorneioView(self.bot, self.autor, participantes, self.formato, self.tipo_evento)
 
-        embed = Embed(
-            title="📋 Classificar Participantes",
-            description=(
-                f"**Torneio:** {self.formato}\n"
-                f"**Participantes:** {len(participantes)}\n\n"
+        # Descrição diferente se for botões ou dropdown
+        if len(participantes) <= 20:
+            instrucoes = (
                 "**Como funciona:**\n"
                 "1️⃣ Clique no botão do jogador\n"
                 "2️⃣ Selecione a posição dele no torneio\n"
                 "3️⃣ Repita para todos os participantes\n"
                 "4️⃣ Clique em **Confirmar Classificação**"
+            )
+        else:
+            instrucoes = (
+                "**Como funciona:**\n"
+                "1️⃣ Selecione um jogador no dropdown\n"
+                "2️⃣ Clique na posição dele no torneio\n"
+                "3️⃣ Repita para todos os participantes\n"
+                "4️⃣ Clique em **Confirmar Classificação**"
+            )
+
+        embed = Embed(
+            title="📋 Classificar Participantes",
+            description=(
+                f"**Torneio:** {self.formato}\n"
+                f"**Participantes:** {len(participantes)}\n\n"
+                f"{instrucoes}"
             ),
             color=discord.Color.blurple()
         )
