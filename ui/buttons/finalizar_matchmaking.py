@@ -84,14 +84,13 @@ class ClassificacaoSelect(Select):
         posicao = int(posicao_str)
         user_id = int(user_id_str)
 
-        # Verificar se o jogador já foi classificado (em qualquer posição)
-        for pos, user_ids in view.classificacao.items():
+        # Remover jogador de posição anterior se já foi classificado
+        for pos, user_ids in list(view.classificacao.items()):
             if user_id in user_ids:
-                await interaction.response.send_message(
-                    f"{emojis.FAILED} | Esse jogador já foi classificado na posição {pos}!",
-                    ephemeral=True
-                )
-                return
+                user_ids.remove(user_id)
+                # Remover posição se ficar vazia
+                if not user_ids:
+                    del view.classificacao[pos]
 
         # Calcular tamanho do time
         tamanho_time = int(view.formato.split("x")[0])
@@ -107,11 +106,13 @@ class ClassificacaoSelect(Select):
                 return
 
         # Registrar classificação (permite múltiplos na mesma posição apenas para times)
-        # Usar uma lista para cada posição
         if posicao not in view.classificacao:
             view.classificacao[posicao] = []
 
         view.classificacao[posicao].append(user_id)
+
+        # Atualizar o embed original
+        await view.atualizar_embed(interaction)
 
         # Encontrar nome do participante
         participante = next((p for p in view.participantes if p['user'].id == user_id), None)
@@ -141,6 +142,7 @@ class FinalizarTorneioView(View):
         self.formato = formato
         self.tipo_evento = tipo_evento
         self.classificacao = {}  # {posicao: [user_ids]}  - Lista de user_ids por posição
+        self.mensagem_original = None  # Para armazenar a mensagem e poder editá-la
 
         # Calcular número de posições baseado nas vagas do torneio
         # Exemplo: 2x2 com 8 participantes = 4 vagas (4 times) = 4 posições
@@ -148,14 +150,83 @@ class FinalizarTorneioView(View):
         num_participantes = len(participantes)
 
         # Extrair tamanho do time do formato (ex: "2x2" -> 2)
-        tamanho_time = int(formato.split("x")[0])
+        self.tamanho_time = int(formato.split("x")[0])
 
         # Calcular número de vagas (times)
-        num_vagas = num_participantes // tamanho_time
+        self.num_vagas = num_participantes // self.tamanho_time
 
         # Adicionar dropdown de classificação
-        dropdown = ClassificacaoSelect(participantes, num_vagas)
+        dropdown = ClassificacaoSelect(participantes, self.num_vagas)
         self.add_item(dropdown)
+
+    def criar_embed_classificacao(self):
+        """Cria o embed mostrando a classificação atual"""
+        num_participantes = len(self.participantes)
+
+        if self.tamanho_time == 1:
+            descricao_formato = f"{num_participantes} jogadores competindo individualmente"
+        else:
+            descricao_formato = f"{self.num_vagas} times de {self.tamanho_time} jogadores ({num_participantes} pessoas total)"
+
+        embed = Embed(
+            title="📋 Classificar Participantes",
+            description=(
+                f"**Torneio:** {self.formato}\n"
+                f"**Formato:** {descricao_formato}\n\n"
+                "**Como funciona:**\n"
+                f"1️⃣ Selecione no dropdown: **Posição + Jogador**\n"
+                f"   • Exemplo: '🥇 1º - PlayerName'\n"
+                f"2️⃣ Repita para todos os {num_participantes} participantes\n"
+                f"3️⃣ Clique em **Confirmar Classificação**\n\n"
+                f"💡 **Posições disponíveis:** 1º ao {self.num_vagas}º lugar"
+            ),
+            color=discord.Color.blurple()
+        )
+
+        # Adicionar classificação atual
+        emojis_posicoes = {
+            1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣",
+            7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟", 11: "1️⃣1️⃣", 12: "1️⃣2️⃣",
+            13: "1️⃣3️⃣", 14: "1️⃣4️⃣", 15: "1️⃣5️⃣", 16: "1️⃣6️⃣"
+        }
+
+        total_classificados = sum(len(jogadores) for jogadores in self.classificacao.values())
+
+        if self.classificacao:
+            classificacao_texto = ""
+            for posicao in sorted(self.classificacao.keys()):
+                emoji = emojis_posicoes.get(posicao, f"{posicao}º")
+                jogadores_nomes = []
+                for user_id in self.classificacao[posicao]:
+                    participante = next((p for p in self.participantes if p['user'].id == user_id), None)
+                    if participante:
+                        jogadores_nomes.append(participante['user'].name)
+
+                jogadores_str = ", ".join(jogadores_nomes)
+                classificacao_texto += f"{emoji} **{posicao}º lugar:** {jogadores_str}\n"
+
+            embed.add_field(
+                name=f"📊 Classificação Atual ({total_classificados}/{num_participantes})",
+                value=classificacao_texto,
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name=f"📊 Classificação Atual (0/{num_participantes})",
+                value="*Nenhum jogador classificado ainda*",
+                inline=False
+            )
+
+        return embed
+
+    async def atualizar_embed(self, interaction: discord.Interaction):
+        """Atualiza o embed da mensagem original"""
+        if self.mensagem_original:
+            try:
+                novo_embed = self.criar_embed_classificacao()
+                await self.mensagem_original.edit(embed=novo_embed, view=self)
+            except:
+                pass  # Se falhar ao editar, não faz nada
 
     @discord.ui.button(label="Confirmar Classificação", style=discord.ButtonStyle.green, emoji="✅", row=4)
     async def confirmar(self, interaction: discord.Interaction, button: Button):
@@ -431,28 +502,9 @@ class FinalizarMatchmaking(View):
         # Mostrar view de classificação
         view = FinalizarTorneioView(self.bot, self.autor, participantes, self.formato, self.tipo_evento)
 
-        # Calcular informações do torneio
-        tamanho_time = int(self.formato.split("x")[0])
-        num_vagas = len(participantes) // tamanho_time
+        # Criar embed inicial
+        embed = view.criar_embed_classificacao()
 
-        if tamanho_time == 1:
-            descricao_formato = f"{len(participantes)} jogadores competindo individualmente"
-        else:
-            descricao_formato = f"{num_vagas} times de {tamanho_time} jogadores ({len(participantes)} pessoas total)"
-
-        embed = Embed(
-            title="📋 Classificar Participantes",
-            description=(
-                f"**Torneio:** {self.formato}\n"
-                f"**Formato:** {descricao_formato}\n\n"
-                "**Como funciona:**\n"
-                f"1️⃣ Selecione no dropdown: **Posição + Jogador**\n"
-                f"   • Exemplo: '🥇 1º - PlayerName'\n"
-                f"2️⃣ Repita para todos os {len(participantes)} participantes\n"
-                f"3️⃣ Clique em **Confirmar Classificação**\n\n"
-                f"💡 **Posições disponíveis:** 1º ao {num_vagas}º lugar"
-            ),
-            color=discord.Color.blurple()
-        )
-
+        # Enviar mensagem e armazenar referência
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        view.mensagem_original = await interaction.original_response()
