@@ -39,30 +39,116 @@ class FinalizarTorneioModal(Modal, title="Finalizar Torneio"):
         await interaction.followup.send(embed=failed, ephemeral=True)
 
 
-class ClassificacaoSelect(Select):
-    def __init__(self, posicao: int, participantes, placeholder: str):
-        self.posicao = posicao
-
-        options = [
-            discord.SelectOption(
-                label=p['user'].name,
-                value=str(p['user'].id),
-                description=f"MMR: {p['mmr']}"
-            )
-            for p in participantes
-        ]
-
+class BotaoParticipante(Button):
+    def __init__(self, user_id: int, user_name: str, mmr: int, row: int):
         super().__init__(
-            placeholder=placeholder,
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id=f"classificacao_{posicao}"
+            label=user_name[:80],  # Discord limit
+            style=discord.ButtonStyle.blurple,
+            custom_id=f"participante_{user_id}",
+            row=row
         )
+        self.user_id = user_id
+        self.user_name = user_name
+        self.mmr = mmr
 
     async def callback(self, interaction: discord.Interaction):
-        # Apenas atualiza a view, não envia nada
-        await interaction.response.defer()
+        view: FinalizarTorneioView = self.view
+
+        # Verificar se já foi classificado
+        if self.user_id in view.classificacao.values():
+            await interaction.response.send_message(
+                f"{emojis.FAILED} | {self.user_name} já foi classificado!",
+                ephemeral=True
+            )
+            return
+
+        # Armazenar o participante selecionado
+        view.participante_selecionado = self.user_id
+
+        # Mostrar view de seleção de posição
+        await interaction.response.send_message(
+            f"Selecione a posição para **{self.user_name}**:",
+            view=SelecionarPosicaoView(view),
+            ephemeral=True
+        )
+
+
+class BotaoPosicao(Button):
+    def __init__(self, posicao: int, emoji: str, label: str, row: int):
+        super().__init__(
+            label=f"{emoji} {label}",
+            style=discord.ButtonStyle.gray,
+            custom_id=f"posicao_{posicao}",
+            row=row
+        )
+        self.posicao = posicao
+
+    async def callback(self, interaction: discord.Interaction):
+        view: SelecionarPosicaoView = self.view
+        main_view = view.main_view
+
+        # Verificar se a posição já foi preenchida
+        if self.posicao in main_view.classificacao:
+            await interaction.response.send_message(
+                f"{emojis.FAILED} | Essa posição já foi preenchida!",
+                ephemeral=True
+            )
+            return
+
+        # Registrar a classificação
+        user_id = main_view.participante_selecionado
+        main_view.classificacao[self.posicao] = user_id
+
+        # Encontrar o nome do participante
+        participante = next((p for p in main_view.participantes if p['user'].id == user_id), None)
+        nome = participante['user'].name if participante else "Desconhecido"
+
+        emoji_posicao = {
+            1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣",
+            7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟", 11: "1️⃣1️⃣", 12: "1️⃣2️⃣",
+            13: "1️⃣3️⃣", 14: "1️⃣4️⃣", 15: "1️⃣5️⃣", 16: "1️⃣6️⃣"
+        }.get(self.posicao, f"{self.posicao}º")
+
+        await interaction.response.send_message(
+            f"{emojis.SUCESS} | **{nome}** classificado em **{emoji_posicao} {self.posicao}º lugar**!\n\n"
+            f"Classificados: {len(main_view.classificacao)}/{len(main_view.participantes)}",
+            ephemeral=True
+        )
+
+
+class SelecionarPosicaoView(View):
+    def __init__(self, main_view):
+        super().__init__(timeout=60)
+        self.main_view = main_view
+
+        emojis_posicoes = {
+            1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣",
+            7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟", 11: "1️⃣1️⃣", 12: "1️⃣2️⃣",
+            13: "1️⃣3️⃣", 14: "1️⃣4️⃣", 15: "1️⃣5️⃣", 16: "1️⃣6️⃣"
+        }
+
+        nomes_posicoes = {
+            1: "1º", 2: "2º", 3: "3º", 4: "4º", 5: "5º", 6: "6º",
+            7: "7º", 8: "8º", 9: "9º", 10: "10º", 11: "11º", 12: "12º",
+            13: "13º", 14: "14º", 15: "15º", 16: "16º"
+        }
+
+        num_posicoes = len(main_view.participantes)
+
+        # Adicionar botões de posição (max 5 por row, max 5 rows = 25 buttons)
+        for i in range(num_posicoes):
+            posicao = i + 1
+            row = i // 5  # 0-4
+            emoji = emojis_posicoes.get(posicao, f"{posicao}º")
+            label = nomes_posicoes.get(posicao, f"{posicao}º")
+
+            # Desabilitar se já preenchido
+            btn = BotaoPosicao(posicao, emoji, label, row)
+            if posicao in main_view.classificacao:
+                btn.disabled = True
+                btn.style = discord.ButtonStyle.green
+
+            self.add_item(btn)
 
 
 class FinalizarTorneioView(View):
@@ -74,30 +160,21 @@ class FinalizarTorneioView(View):
         self.formato = formato
         self.tipo_evento = tipo_evento
         self.classificacao = {}  # {posicao: user_id}
+        self.participante_selecionado = None  # Para armazenar o participante sendo classificado
 
-        num_participantes = len(participantes)
+        # Adicionar botões dos participantes (max 5 por row)
+        for i, participante in enumerate(participantes):
+            row = i // 5  # 0-4 (max 5 rows)
+            if row >= 4:  # Deixar row 4 para o botão de confirmar
+                break
 
-        # Adicionar selects baseado no número de participantes
-        emojis_posicoes = {
-            1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣",
-            5: "5️⃣", 6: "6️⃣", 7: "7️⃣", 8: "8️⃣",
-            9: "9️⃣", 10: "🔟", 11: "1️⃣1️⃣", 12: "1️⃣2️⃣",
-            13: "1️⃣3️⃣", 14: "1️⃣4️⃣", 15: "1️⃣5️⃣", 16: "1️⃣6️⃣"
-        }
-
-        nomes_posicoes = {
-            1: "1º Lugar (Campeão)",
-            2: "2º Lugar (Vice)",
-            3: "3º Lugar",
-            4: "4º Lugar"
-        }
-
-        # Adicionar um select para cada posição
-        for posicao in range(1, num_participantes + 1):
-            emoji = emojis_posicoes.get(posicao, f"{posicao}️⃣")
-            nome = nomes_posicoes.get(posicao, f"{posicao}º Lugar")
-            placeholder = f"{emoji} {nome}"
-            self.add_item(ClassificacaoSelect(posicao, participantes, placeholder))
+            btn = BotaoParticipante(
+                participante['user'].id,
+                participante['user'].name,
+                participante['mmr'],
+                row
+            )
+            self.add_item(btn)
 
     @discord.ui.button(label="Confirmar Classificação", style=discord.ButtonStyle.green, emoji="✅", row=4)
     async def confirmar(self, interaction: discord.Interaction, button: Button):
@@ -112,27 +189,13 @@ class FinalizarTorneioView(View):
                 )
                 return await interaction.response.send_message(embed=failed, ephemeral=True)
 
-        # Coletar seleções dos selects
-        classificacao_temp = {}
-        for child in self.children:
-            if isinstance(child, ClassificacaoSelect) and child.values:
-                classificacao_temp[child.posicao] = int(child.values[0])
-
         # Validar se todas as posições foram preenchidas
         num_participantes = len(self.participantes)
-        if len(classificacao_temp) < num_participantes:
+        if len(self.classificacao) < num_participantes:
             failed = Embed(
                 title=f"{emojis.FAILED} | Classificação incompleta!",
-                description=f"Selecione a posição de todos os {num_participantes} participantes.",
-                color=discord.Color.red()
-            )
-            return await interaction.response.send_message(embed=failed, ephemeral=True)
-
-        # Validar se não há duplicatas
-        if len(set(classificacao_temp.values())) != len(classificacao_temp):
-            failed = Embed(
-                title=f"{emojis.FAILED} | Jogadores duplicados!",
-                description="Você selecionou o mesmo jogador em posições diferentes.",
+                description=f"Classifique todos os {num_participantes} participantes antes de confirmar.\n\n"
+                           f"**Classificados:** {len(self.classificacao)}/{num_participantes}",
                 color=discord.Color.red()
             )
             return await interaction.response.send_message(embed=failed, ephemeral=True)
@@ -144,7 +207,7 @@ class FinalizarTorneioView(View):
         resultado = await functions.finalizar_torneio(
             session,
             self.autor.id,
-            classificacao_temp,
+            self.classificacao,
             self.participantes,
             self.formato,
             0,  # valor_partida removido, não é mais usado
@@ -371,7 +434,11 @@ class FinalizarMatchmaking(View):
             description=(
                 f"**Torneio:** {self.formato}\n"
                 f"**Participantes:** {len(participantes)}\n\n"
-                "Selecione a posição final de cada jogador nos dropdowns abaixo:"
+                "**Como funciona:**\n"
+                "1️⃣ Clique no botão do jogador\n"
+                "2️⃣ Selecione a posição dele no torneio\n"
+                "3️⃣ Repita para todos os participantes\n"
+                "4️⃣ Clique em **Confirmar Classificação**"
             ),
             color=discord.Color.blurple()
         )
