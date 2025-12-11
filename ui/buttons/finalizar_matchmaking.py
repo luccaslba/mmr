@@ -1,4 +1,4 @@
-import discord, emojis, functions, config_bot
+import discord, emojis, functions, config_bot, random
 from discord import Embed
 from discord.ui import View, Button, Modal, TextInput, Select
 from db import session, Users, Guild_Config, MatchParticipantes
@@ -320,6 +320,131 @@ class FinalizarMatchmaking(View):
         self.jogadores_sorteados_ids = jogadores_sorteados_ids or []
         self.formato = formato
         self.tipo_evento = tipo_evento
+
+    @discord.ui.button(label="Gerar Confrontos", style=discord.ButtonStyle.blurple, emoji="⚔️", custom_id="gerar_confrontos")
+    async def gerar_confrontos(self, interaction: discord.Interaction, btn: Button):
+        # Verificar permissão
+        guild = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
+        if guild:
+            perm_role = interaction.guild.get_role(guild.perm_cmd_role_id)
+            if interaction.user.id != self.autor.id and interaction.user.id != config_bot.OWNER_ID and not interaction.user.get_role(guild.perm_cmd_role_id):
+                failed = Embed(
+                    title=f"{emojis.FAILED} | Você não possui permissão!",
+                    description=f"**Apenas: {self.autor.mention} ou pessoas com o cargo: {perm_role.mention}, podem usar esse botão**",
+                    color=discord.Color.red()
+                )
+                return await interaction.response.send_message(embed=failed, ephemeral=True)
+
+        if not self.jogadores_sorteados_ids:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Erro ao carregar participantes!",
+                description="Lista de jogadores sorteados não encontrada.",
+                color=discord.Color.red()
+            )
+            return await interaction.response.send_message(embed=failed, ephemeral=True)
+
+        # Buscar dados dos jogadores
+        participantes = []
+        for user_id in self.jogadores_sorteados_ids:
+            user_db = session.query(Users).filter_by(discord_id=user_id).first()
+            if user_db:
+                user = interaction.guild.get_member(user_id)
+                if user:
+                    participantes.append({
+                        'user': user,
+                        'mmr': user_db.MRR
+                    })
+
+        if len(participantes) < 2:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Jogadores insuficientes!",
+                description="É necessário pelo menos 2 jogadores para gerar confrontos.",
+                color=discord.Color.red()
+            )
+            return await interaction.response.send_message(embed=failed, ephemeral=True)
+
+        # Calcular tamanho do time
+        tamanho_time = int(self.formato.split("x")[0])
+
+        # Para 1x1: cada participante é um competidor
+        # Para 2x2: cada 2 participantes formam um time
+        # Para 3x3: cada 3 participantes formam um time
+
+        if tamanho_time == 1:
+            # Modo individual - embaralhar jogadores e formar pares
+            jogadores_embaralhados = participantes.copy()
+            random.shuffle(jogadores_embaralhados)
+
+            confrontos = []
+            for i in range(0, len(jogadores_embaralhados) - 1, 2):
+                if i + 1 < len(jogadores_embaralhados):
+                    confrontos.append((
+                        [jogadores_embaralhados[i]],
+                        [jogadores_embaralhados[i + 1]]
+                    ))
+        else:
+            # Modo equipes - primeiro formar times, depois embaralhar e formar confrontos
+            # Assumindo que os jogadores já estão agrupados por times na ordem
+            num_times = len(participantes) // tamanho_time
+            times = []
+
+            for i in range(num_times):
+                time = participantes[i * tamanho_time : (i + 1) * tamanho_time]
+                times.append(time)
+
+            # Embaralhar times
+            random.shuffle(times)
+
+            confrontos = []
+            for i in range(0, len(times) - 1, 2):
+                if i + 1 < len(times):
+                    confrontos.append((times[i], times[i + 1]))
+
+        # Criar embed com os confrontos
+        embed = Embed(
+            title=f"⚔️ Confrontos Gerados - {self.formato}",
+            description=f"**Organizador:** {self.autor.mention}\n**Total de confrontos:** {len(confrontos)}",
+            color=discord.Color.orange()
+        )
+
+        for idx, (time1, time2) in enumerate(confrontos, 1):
+            if tamanho_time == 1:
+                jogador1 = time1[0]['user'].mention
+                jogador2 = time2[0]['user'].mention
+                embed.add_field(
+                    name=f"🎮 Confronto {idx}",
+                    value=f"{jogador1} **VS** {jogador2}",
+                    inline=False
+                )
+            else:
+                jogadores_time1 = ", ".join([j['user'].mention for j in time1])
+                jogadores_time2 = ", ".join([j['user'].mention for j in time2])
+                embed.add_field(
+                    name=f"🎮 Confronto {idx}",
+                    value=f"**Time A:** {jogadores_time1}\n**VS**\n**Time B:** {jogadores_time2}",
+                    inline=False
+                )
+
+        # Verificar se sobrou alguém (número ímpar)
+        if tamanho_time == 1 and len(participantes) % 2 == 1:
+            sobrou = participantes[-1]['user'].mention
+            embed.add_field(
+                name="⏳ Aguardando",
+                value=f"{sobrou} aguarda o vencedor de um confronto",
+                inline=False
+            )
+        elif tamanho_time > 1 and (len(participantes) // tamanho_time) % 2 == 1:
+            time_sobrou = participantes[-(tamanho_time):]
+            jogadores_sobrou = ", ".join([j['user'].mention for j in time_sobrou])
+            embed.add_field(
+                name="⏳ Aguardando",
+                value=f"**Time:** {jogadores_sobrou}\nAguarda o vencedor de um confronto",
+                inline=False
+            )
+
+        embed.set_footer(text="Clique em 'Gerar Confrontos' novamente para embaralhar")
+
+        await interaction.response.send_message(embed=embed)
 
     @discord.ui.button(label="Finalizar Torneio", style=discord.ButtonStyle.green, emoji="🏆", custom_id="finalizar_torneio_v2")
     async def finalizar(self, interaction: discord.Interaction, btn: Button):
