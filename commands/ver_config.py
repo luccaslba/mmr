@@ -30,10 +30,12 @@ class VerConfig(Cog):
                 confrontos_channel = interact.guild.get_channel(guild.confronto_channel_id)
                 perm_cmd_role = interact.guild.get_role(guild.perm_cmd_role_id)
                 bdf_role = interact.guild.get_role(guild.bdf_role_id) if guild.bdf_role_id else None
+                ranqueada_channel = interact.guild.get_channel(guild.ranqueada_channel_id) if guild.ranqueada_channel_id else None
 
                 sucess.add_field(name="mmr_channel:", value=mmr_channel.mention)
                 sucess.add_field(name="matchmaking_channel:", value=matchmaking_channel.mention, inline=False)
                 sucess.add_field(name="confrontos_channel:", value=confrontos_channel.mention, inline=False)
+                sucess.add_field(name="ranqueada_channel:", value=ranqueada_channel.mention if ranqueada_channel else "Não configurado", inline=False)
                 sucess.add_field(name="match_close_count:", value=guild.match_close_count, inline=False)
                 sucess.add_field(name="perm_cmd_role:", value=perm_cmd_role, inline=False)
                 sucess.add_field(name="bdf_role:", value=bdf_role.mention if bdf_role else "Não configurado", inline=False)
