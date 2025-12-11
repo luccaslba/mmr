@@ -344,6 +344,84 @@ async def finalizar_torneio(session, autor_id, classificacao, participantes, for
             'erro': str(e)
         }
 
+
+async def finalizar_torneio_times(session, autor_id, classificacao_por_jogador, participantes, formato, valor_partida, guild_id, tipo_evento):
+    """
+    Finaliza o torneio com suporte a times (2x2, 3x3).
+    Todos os jogadores do mesmo time recebem a mesma posição e mesmo cálculo de MMR.
+
+    Args:
+        session: Sessão do banco de dados
+        autor_id: ID do organizador
+        classificacao_por_jogador: Dict {user_id: posicao_do_time}
+        participantes: Lista de dicts com 'user' e 'mmr'
+        formato: String do formato (1x1, 2x2, 3x3)
+        valor_partida: Valor da partida
+        guild_id: ID do servidor
+        tipo_evento: Tipo do evento (aberto, fechado, bdf, ranqueada)
+
+    Returns:
+        Dict com 'sucesso' e 'resultados' ou 'erro'
+    """
+    try:
+        num_jogadores = len(participantes)
+        tamanho_time = int(formato.split("x")[0])
+        num_times = num_jogadores // tamanho_time
+
+        # Calcular MMR médio
+        mmr_total = sum(p['mmr'] for p in participantes)
+        mmr_medio = mmr_total / num_jogadores
+
+        # Buscar constante K baseada no tipo de evento
+        K = obter_k_por_tipo_evento(guild_id, tipo_evento)
+
+        resultados = {}
+
+        for user_id, posicao_time in classificacao_por_jogador.items():
+            # Buscar jogador no banco
+            user_db = session.query(Users).filter_by(discord_id=user_id).first()
+            if not user_db:
+                continue
+
+            mmr_antigo = user_db.MRR
+
+            # Calcular delta de MMR usando a posição do TIME (não posição individual)
+            # Para times, usamos num_times como quantidade de "competidores"
+            delta_mmr = calcular_mmr(
+                mmr_jogador=mmr_antigo,
+                mmr_medio=mmr_medio,
+                colocacao=posicao_time,
+                k=K,
+                jogadores_quantity=num_times  # Número de times, não de jogadores
+            )
+
+            # Atualizar MMR
+            mmr_novo = mmr_antigo + int(delta_mmr)
+            user_db.MRR = mmr_novo
+
+            resultados[user_id] = {
+                'user_id': user_id,
+                'posicao': posicao_time,
+                'mmr_antigo': mmr_antigo,
+                'mmr_novo': mmr_novo,
+                'delta_mmr': int(delta_mmr)
+            }
+
+        session.commit()
+
+        return {
+            'sucesso': True,
+            'resultados': resultados,
+            'k_usado': K
+        }
+
+    except Exception as e:
+        session.rollback()
+        return {
+            'sucesso': False,
+            'erro': str(e)
+        }
+
 def coletar_dados_usuarios(users):
     dados = []
     for u in users:

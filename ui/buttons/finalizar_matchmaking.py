@@ -220,19 +220,19 @@ class ConfirmarClassificacaoView(View):
     async def confirmar(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True)
 
-        # Converter classificacao de {posicao: [user_ids]} para {posicao_sequencial: user_id}
-        classificacao_expandida = {}
-        posicao_atual = 1
+        # Para times (2x2, 3x3), cada jogador do mesmo time deve ter A MESMA posição
+        # Converter {posicao_time: [user_ids]} para {user_id: posicao_time}
+        classificacao_por_jogador = {}
         for posicao_time in sorted(self.classificacao.keys()):
             for user_id in self.classificacao[posicao_time]:
-                classificacao_expandida[posicao_atual] = user_id
-                posicao_atual += 1
+                # Todos os jogadores do mesmo time recebem a mesma posição
+                classificacao_por_jogador[user_id] = posicao_time
 
-        # Processar finalização
-        resultado = await functions.finalizar_torneio(
+        # Processar finalização com a nova função que entende times
+        resultado = await functions.finalizar_torneio_times(
             session,
             self.autor.id,
-            classificacao_expandida,
+            classificacao_por_jogador,
             self.participantes,
             self.formato,
             0,
@@ -250,17 +250,30 @@ class ConfirmarClassificacaoView(View):
             emojis_posicoes = {1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣",
                               7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟"}
 
-            for pos, dados in sorted(resultado['resultados'].items()):
-                emoji = emojis_posicoes.get(pos, f"{pos}º")
-                user = discord.utils.get(interaction.guild.members, id=dados['user_id'])
+            # Agrupar jogadores por posição para exibir times juntos
+            posicoes_agrupadas = {}
+            for user_id, dados in resultado['resultados'].items():
+                pos = dados['posicao']
+                if pos not in posicoes_agrupadas:
+                    posicoes_agrupadas[pos] = []
+                posicoes_agrupadas[pos].append(dados)
 
-                delta = dados['delta_mmr']
-                sinal = "+" if delta >= 0 else ""
+            for pos in sorted(posicoes_agrupadas.keys()):
+                jogadores_pos = posicoes_agrupadas[pos]
+                emoji = emojis_posicoes.get(pos, f"{pos}º")
+
+                jogadores_texto = ""
+                for dados in jogadores_pos:
+                    user = discord.utils.get(interaction.guild.members, id=dados['user_id'])
+                    delta = dados['delta_mmr']
+                    sinal = "+" if delta >= 0 else ""
+                    if user:
+                        jogadores_texto += f"{user.mention}: {sinal}{delta} MMR → **{dados['mmr_novo']} MMR**\n"
 
                 embed.add_field(
                     name=f"{emoji} {pos}º Lugar",
-                    value=f"{user.mention}\n{sinal}{delta} MMR → **{dados['mmr_novo']} MMR**",
-                    inline=True
+                    value=jogadores_texto.strip(),
+                    inline=False
                 )
 
             embed.set_footer(text=f"Organizado por {self.autor.name}", icon_url=self.autor.display_avatar.url)
