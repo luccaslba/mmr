@@ -19,15 +19,13 @@ class StartRanqueadaView(View):
         await self.iniciar_ranqueada(interaction, "2x2")
 
     async def iniciar_ranqueada(self, interaction: discord.Interaction, formato: str):
-        # Verificar se usuário está registrado
+        # Verificar se usuário está registrado, se não, registrar automaticamente
         user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
         if not user_db:
-            failed = Embed(
-                title=f"{emojis.FAILED} | Você precisa estar registrado!",
-                description="Use `/register` para se registrar.",
-                color=discord.Color.red()
-            )
-            return await interaction.response.send_message(embed=failed, ephemeral=True)
+            add_user = Users(interaction.user.id, interaction.user.name, 0, interaction.guild.id)
+            session.add(add_user)
+            session.commit()
+            user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
 
         # Perguntar se vai participar
         embed = Embed(
@@ -169,15 +167,13 @@ class InscricaoRanqueadaView(View):
             if inscrito['user'].id == interaction.user.id:
                 return await interaction.response.send_message("Você já está inscrito!", ephemeral=True)
 
-        # Verificar se está registrado
+        # Verificar se está registrado, se não, registrar automaticamente
         user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
         if not user_db:
-            failed = Embed(
-                title=f"{emojis.FAILED} | Você precisa estar registrado!",
-                description="Use `/register` para se registrar.",
-                color=discord.Color.red()
-            )
-            return await interaction.response.send_message(embed=failed, ephemeral=True)
+            add_user = Users(interaction.user.id, interaction.user.name, 0, interaction.guild.id)
+            session.add(add_user)
+            session.commit()
+            user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
 
         # Adicionar à lista
         self.inscritos.append({
