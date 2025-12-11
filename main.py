@@ -1,11 +1,38 @@
-import discord, config_bot, os, db, functions
+import discord, config_bot, os, db, functions, sqlite3
 from discord.ext import commands
 from discord.ext.commands import Bot
 from db import MatchParticipantes
 from ui.buttons.start_matchmaking import StartMatchMakingV2
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
+from ui.buttons.start_ranqueada import StartRanqueadaView
 
 bot = Bot(command_prefix=config_bot.PREFIX, intents=discord.Intents.all())
+
+def run_auto_migrations():
+    """Executa migrações automaticamente ao iniciar o bot"""
+    try:
+        conn = sqlite3.connect('database.db')
+        cursor = conn.cursor()
+
+        cursor.execute("PRAGMA table_info(GuildConfig)")
+        columns = [column[1] for column in cursor.fetchall()]
+
+        # Migração: ranqueada_channel_id
+        if 'ranqueada_channel_id' not in columns:
+            cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_channel_id INTEGER")
+            conn.commit()
+            print("✅ Migração: coluna ranqueada_channel_id adicionada")
+
+        # Migração: bdf_role_id
+        if 'bdf_role_id' not in columns:
+            cursor.execute("ALTER TABLE GuildConfig ADD COLUMN bdf_role_id INTEGER")
+            conn.commit()
+            print("✅ Migração: coluna bdf_role_id adicionada")
+
+        conn.close()
+        print("✅ Migrações verificadas com sucesso")
+    except Exception as e:
+        print(f"⚠️ Erro nas migrações: {e}")
 
 async def load_commands():
     for filename in os.listdir("commands"):
@@ -17,8 +44,9 @@ async def load_commands():
 @bot.event
 async def on_ready():
     print("Bot online: ", bot.user)
+    run_auto_migrations()
     bot.add_view(StartMatchMakingV2(bot))
-    user = bot.get_user(config_bot.OWNER_ID)
+    bot.add_view(StartRanqueadaView(bot))
     await load_commands()
 
 @bot.command()
@@ -62,8 +90,6 @@ async def teste(ctx: commands.Context):
 async def migrate(ctx: commands.Context):
     """Comando para executar migração do banco de dados"""
     if ctx.author.id == config_bot.OWNER_ID:
-        import sqlite3
-
         try:
             conn = sqlite3.connect('database.db')
             cursor = conn.cursor()
@@ -71,10 +97,11 @@ async def migrate(ctx: commands.Context):
             migracoes_aplicadas = []
             migracoes_desnecessarias = []
 
-            # Migração 1: Adicionar coluna bdf_role_id
+            # Verificar colunas existentes
             cursor.execute("PRAGMA table_info(GuildConfig)")
             columns = [column[1] for column in cursor.fetchall()]
 
+            # Migração 1: Adicionar coluna bdf_role_id
             if 'bdf_role_id' not in columns:
                 cursor.execute("ALTER TABLE GuildConfig ADD COLUMN bdf_role_id INTEGER")
                 conn.commit()
@@ -82,7 +109,15 @@ async def migrate(ctx: commands.Context):
             else:
                 migracoes_desnecessarias.append("Coluna `bdf_role_id` já existe")
 
-            # Migração 2: Criar tabela ConstantesK
+            # Migração 2: Adicionar coluna ranqueada_channel_id
+            if 'ranqueada_channel_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_channel_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `ranqueada_channel_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `ranqueada_channel_id` já existe")
+
+            # Migração 3: Criar tabela ConstantesK
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ConstantesK'")
             tabela_existe = cursor.fetchone()
 
