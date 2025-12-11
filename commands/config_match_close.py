@@ -20,7 +20,7 @@ class ConfigMatchClose(Cog):
         await sleep(2)
         guild = db.session.query(db.Guild_Config).filter_by(guild_id=interact.guild.id).first()
         if guild:
-            if interact.user.get_role(guild.perm_cmd_role_id):
+            if interact.user.get_role(guild.perm_cmd_role_id) or interact.user.id == config_bot.OWNER_ID:
                 antigo = guild.match_close_count
                 guild.match_close_count = match_close_count
                 db.session.commit()

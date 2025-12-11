@@ -29,7 +29,7 @@ class Gerenciarelo(Cog):
 
         if guild:
             print("guild")
-            if interact.user.get_role(guild.perm_cmd_role_id):
+            if interact.user.get_role(guild.perm_cmd_role_id) or interact.user.id == config_bot.OWNER_ID:
                 print("Verifique")
                 user_db = db.session.query(db.Users).filter_by(discord_id=user.id).first()
                 if not user_db:

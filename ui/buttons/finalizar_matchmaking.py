@@ -1,4 +1,4 @@
-import discord, emojis, functions
+import discord, emojis, functions, config_bot
 from discord import Embed
 from discord.ui import View, Button, Modal, TextInput, Select
 from db import session, Users, Guild_Config, MatchParticipantes
@@ -233,7 +233,7 @@ class FinalizarTorneioView(View):
         # Verificar permissão
         guild_config = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
         if guild_config:
-            if interaction.user.id != self.autor.id and not interaction.user.get_role(guild_config.perm_cmd_role_id):
+            if interaction.user.id != self.autor.id and interaction.user.id != config_bot.OWNER_ID and not interaction.user.get_role(guild_config.perm_cmd_role_id):
                 failed = Embed(
                     title=f"{emojis.FAILED} | Sem permissão!",
                     description=f"Apenas {self.autor.mention} ou membros com permissão podem finalizar.",
@@ -457,7 +457,7 @@ class FinalizarMatchmaking(View):
         guild = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
         if guild:
             perm_role = interaction.guild.get_role(guild.perm_cmd_role_id)
-            if interaction.user.id != self.autor.id and not interaction.user.get_role(guild.perm_cmd_role_id):
+            if interaction.user.id != self.autor.id and interaction.user.id != config_bot.OWNER_ID and not interaction.user.get_role(guild.perm_cmd_role_id):
                 failed = Embed(
                     title=f"{emojis.FAILED} | Você não possui permissão!",
                     description=f"**Apenas: {self.autor.mention} ou pessoas com o cargo: {perm_role.mention}, podem usar esse botão**",

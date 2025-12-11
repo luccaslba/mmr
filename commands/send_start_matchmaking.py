@@ -22,7 +22,7 @@ class SendStartMatchMaking(Cog):
         guild = db.session.query(db.Guild_Config).filter_by(guild_id=interact.guild.id).first()
         if guild:
 
-            if interact.user.get_role(guild.perm_cmd_role_id):
+            if interact.user.get_role(guild.perm_cmd_role_id) or interact.user.id == config_bot.OWNER_ID:
 
                 mrr_channel = interact.guild.get_channel(guild.mrr_channel_id)
 
