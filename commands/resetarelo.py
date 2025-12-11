@@ -24,7 +24,7 @@ class Resetarelo(Cog):
             if interact.user.get_role(guild.perm_cmd_role_id) or interact.user.id == config_bot.OWNER_ID:
                 count = 0
                 for _, user in enumerate(users, start=1):
-                    if user.MRR >= 1:
+                    if user.MRR != 0:  # Reseta qualquer valor diferente de 0 (positivo ou negativo)
                         user.MRR = 0
                         db.session.add(user)
                         db.session.commit()
