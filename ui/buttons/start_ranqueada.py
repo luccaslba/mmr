@@ -79,9 +79,6 @@ class ConfirmarParticipacaoView(View):
                 'garantido': True  # Organizador é garantido
             })
 
-        # Criar embed da ranqueada
-        embed = self.criar_embed_ranqueada(inscritos, 300)  # 5 minutos = 300 segundos
-
         # Obter canal de confronto
         confronto_channel = interaction.guild.get_channel(config.ranqueada_confronto_channel_id) if config.ranqueada_confronto_channel_id else None
 
@@ -95,6 +92,9 @@ class ConfirmarParticipacaoView(View):
             confronto_channel
         )
 
+        # Criar embed da ranqueada
+        embed = view.criar_embed_atualizado()
+
         await interaction.response.edit_message(
             embed=Embed(title="✅ Ranqueada criada!", description=f"Veja no canal {channel.mention}.", color=discord.Color.green()),
             view=None
@@ -105,42 +105,6 @@ class ConfirmarParticipacaoView(View):
 
         # Iniciar timer de 5 minutos
         asyncio.create_task(view.iniciar_timer(message, channel))
-
-    def criar_embed_ranqueada(self, inscritos, tempo_restante):
-        minutos = tempo_restante // 60
-        segundos = tempo_restante % 60
-
-        inscritos_texto = ""
-        if inscritos:
-            for i, inscrito in enumerate(inscritos, 1):
-                garantido = " ⭐" if inscrito.get('garantido') else ""
-                inscritos_texto += f"`{i}.` {inscrito['user'].mention} (MMR: {inscrito['mmr']}){garantido}\n"
-        else:
-            inscritos_texto = "*Nenhum inscrito ainda*"
-
-        embed = Embed(
-            title=f"🏆 Ranqueada {self.formato}",
-            description=(
-                f"**Organizador:** {self.organizador.mention}\n"
-                f"**Formato:** `{self.formato}`\n"
-                f"**Tempo restante:** `{minutos:02d}:{segundos:02d}`\n\n"
-                f"**Regras:**\n"
-                f"• Se bater **8 inscritos** → Inicia imediatamente\n"
-                f"• Se não bater em 5min → Sorteia **4 jogadores**\n"
-                f"• Mínimo **4 jogadores** para acontecer\n\n"
-                f"**Clique em 'Participar' para entrar!**"
-            ),
-            color=discord.Color.gold()
-        )
-
-        embed.add_field(
-            name=f"📋 Inscritos ({len(inscritos)}/8)",
-            value=inscritos_texto,
-            inline=False
-        )
-
-        embed.set_footer(text="⭐ = Vaga garantida (organizador)")
-        return embed
 
 
 class InscricaoRanqueadaView(View):
@@ -156,6 +120,18 @@ class InscricaoRanqueadaView(View):
         self.message = None
         self.finalizado = False
         self.tempo_restante = 300  # 5 minutos
+
+        # Configurações baseadas no formato
+        # 1x1: max 8, min 4, sorteia 4
+        # 2x2: max 16, min 8, sorteia 8
+        if formato == "1x1":
+            self.max_jogadores = 8
+            self.min_jogadores = 4
+            self.jogadores_sorteio = 4
+        else:  # 2x2
+            self.max_jogadores = 16
+            self.min_jogadores = 8
+            self.jogadores_sorteio = 8
 
     @discord.ui.button(label="Participar", style=discord.ButtonStyle.green, emoji="✅", custom_id="ranqueada_participar")
     async def btn_participar(self, interaction: discord.Interaction, button: Button):
@@ -187,8 +163,8 @@ class InscricaoRanqueadaView(View):
         # Atualizar embed
         await self.atualizar_embed()
 
-        # Se bateu 8, iniciar imediatamente
-        if len(self.inscritos) >= 8:
+        # Se bateu o máximo, iniciar imediatamente
+        if len(self.inscritos) >= self.max_jogadores:
             await self.iniciar_partida(self.message.channel, modo="completo")
 
     @discord.ui.button(label="Sair", style=discord.ButtonStyle.red, emoji="❌", custom_id="ranqueada_sair")
@@ -256,23 +232,35 @@ class InscricaoRanqueadaView(View):
         else:
             inscritos_texto = "*Nenhum inscrito ainda*"
 
+        # Texto das regras baseado no formato
+        if self.formato == "1x1":
+            regras = (
+                f"• Se bater **{self.max_jogadores} inscritos** → Inicia imediatamente\n"
+                f"• Se não bater em 5min → Sorteia **{self.jogadores_sorteio} jogadores**\n"
+                f"• Mínimo **{self.min_jogadores} jogadores** para acontecer"
+            )
+        else:  # 2x2
+            regras = (
+                f"• Se bater **{self.max_jogadores} inscritos** → Inicia imediatamente\n"
+                f"• Se não bater em 5min → Sorteia **{self.jogadores_sorteio} jogadores** (4 duplas)\n"
+                f"• Mínimo **{self.min_jogadores} jogadores** para acontecer\n"
+                f"• As duplas serão sorteadas automaticamente!"
+            )
+
         embed = Embed(
             title=f"🏆 Ranqueada {self.formato}",
             description=(
                 f"**Organizador:** {self.organizador.mention}\n"
                 f"**Formato:** `{self.formato}`\n"
                 f"**Tempo restante:** `{minutos:02d}:{segundos:02d}`\n\n"
-                f"**Regras:**\n"
-                f"• Se bater **8 inscritos** → Inicia imediatamente\n"
-                f"• Se não bater em 5min → Sorteia **4 jogadores**\n"
-                f"• Mínimo **4 jogadores** para acontecer\n\n"
+                f"**Regras:**\n{regras}\n\n"
                 f"**Clique em 'Participar' para entrar!**"
             ),
             color=discord.Color.gold()
         )
 
         embed.add_field(
-            name=f"📋 Inscritos ({len(self.inscritos)}/8)",
+            name=f"📋 Inscritos ({len(self.inscritos)}/{self.max_jogadores})",
             value=inscritos_texto,
             inline=False
         )
@@ -292,50 +280,71 @@ class InscricaoRanqueadaView(View):
             # Atualizar embed com tempo restante
             await self.atualizar_embed()
 
-            # Verificar se já bateu 8
-            if len(self.inscritos) >= 8:
+            # Verificar se já bateu o máximo
+            if len(self.inscritos) >= self.max_jogadores:
                 await self.iniciar_partida(channel, modo="completo")
                 return
 
         # Tempo acabou
         if not self.finalizado:
-            if len(self.inscritos) >= 4:
+            if len(self.inscritos) >= self.min_jogadores:
                 await self.iniciar_partida(channel, modo="sorteio")
             else:
                 await self.cancelar_por_falta_jogadores(channel)
 
     async def iniciar_partida(self, channel, modo: str):
-        """Inicia a partida com 8 jogadores (completo) ou sorteia 4"""
+        """Inicia a partida com jogadores completos ou sorteados"""
         if self.finalizado:
             return
 
         self.finalizado = True
 
         if modo == "completo":
-            # Pegar os 8 primeiros
-            jogadores_selecionados = self.inscritos[:8]
-            titulo = "🏆 Ranqueada Iniciada! (8 jogadores)"
+            # Pegar os jogadores até o máximo
+            jogadores_selecionados = self.inscritos[:self.max_jogadores]
+            titulo = f"🏆 Ranqueada Iniciada! ({self.max_jogadores} jogadores)"
         else:
-            # Sortear 4, garantindo o organizador se estiver participando
+            # Sortear jogadores, garantindo o organizador se estiver participando
             garantidos = [i for i in self.inscritos if i.get('garantido')]
             nao_garantidos = [i for i in self.inscritos if not i.get('garantido')]
 
-            vagas_sorteio = 4 - len(garantidos)
+            vagas_sorteio = self.jogadores_sorteio - len(garantidos)
 
             if vagas_sorteio > 0 and len(nao_garantidos) > 0:
                 sorteados = random.sample(nao_garantidos, min(vagas_sorteio, len(nao_garantidos)))
                 jogadores_selecionados = garantidos + sorteados
             else:
-                jogadores_selecionados = garantidos[:4]
+                jogadores_selecionados = garantidos[:self.jogadores_sorteio]
 
-            titulo = "🏆 Ranqueada Iniciada! (4 jogadores sorteados)"
+            titulo = f"🏆 Ranqueada Iniciada! ({len(jogadores_selecionados)} jogadores sorteados)"
 
-        # Criar embed de resultado
-        jogadores_texto = ""
-        jogadores_ids = []
-        for i, jogador in enumerate(jogadores_selecionados, 1):
-            jogadores_texto += f"`{i}.` {jogador['user'].mention} (MMR: {jogador['mmr']})\n"
-            jogadores_ids.append(jogador['user'].id)
+        # Para 2x2, sortear as duplas
+        if self.formato == "2x2":
+            # Embaralhar jogadores para formar duplas aleatórias
+            jogadores_embaralhados = jogadores_selecionados.copy()
+            random.shuffle(jogadores_embaralhados)
+
+            # Criar texto com duplas
+            jogadores_texto = "**Duplas sorteadas:**\n"
+            jogadores_ids = []
+            for i in range(0, len(jogadores_embaralhados), 2):
+                if i + 1 < len(jogadores_embaralhados):
+                    j1 = jogadores_embaralhados[i]
+                    j2 = jogadores_embaralhados[i + 1]
+                    dupla_num = (i // 2) + 1
+                    jogadores_texto += f"**Dupla {dupla_num}:** {j1['user'].mention} + {j2['user'].mention}\n"
+                    jogadores_ids.append(j1['user'].id)
+                    jogadores_ids.append(j2['user'].id)
+
+            # Atualizar jogadores_selecionados com a ordem embaralhada
+            jogadores_selecionados = jogadores_embaralhados
+        else:
+            # 1x1 - lista normal
+            jogadores_texto = ""
+            jogadores_ids = []
+            for i, jogador in enumerate(jogadores_selecionados, 1):
+                jogadores_texto += f"`{i}.` {jogador['user'].mention} (MMR: {jogador['mmr']})\n"
+                jogadores_ids.append(jogador['user'].id)
 
         embed = Embed(
             title=titulo,
@@ -343,16 +352,12 @@ class InscricaoRanqueadaView(View):
                 f"**Organizador:** {self.organizador.mention}\n"
                 f"**Formato:** `{self.formato}`\n"
                 f"**Tipo:** Ranqueada (K=5)\n\n"
-                f"**Jogadores:**\n{jogadores_texto}"
+                f"{jogadores_texto}"
             ),
             color=discord.Color.green()
         )
 
         # Criar view de finalização
-        participantes_para_finalizar = [
-            {'user': j['user'], 'mmr': j['mmr']} for j in jogadores_selecionados
-        ]
-
         view = FinalizarMatchmaking(
             self.bot,
             self.organizador,
@@ -386,7 +391,7 @@ class InscricaoRanqueadaView(View):
             title="❌ Ranqueada Cancelada",
             description=(
                 f"Não houve jogadores suficientes.\n\n"
-                f"**Inscritos:** {len(self.inscritos)}/4 (mínimo)\n"
+                f"**Inscritos:** {len(self.inscritos)}/{self.min_jogadores} (mínimo)\n"
                 f"**Organizador:** {self.organizador.mention}"
             ),
             color=discord.Color.red()
