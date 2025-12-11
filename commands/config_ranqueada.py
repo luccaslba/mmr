@@ -7,9 +7,19 @@ class ConfigRanqueada(Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(description="Configurar o canal de partidas ranqueadas")
-    @app_commands.describe(canal="O canal onde será enviado o botão de ranqueada")
-    async def config_ranqueada(self, interact: discord.Interaction, canal: discord.TextChannel):
+    @app_commands.command(description="Configurar os canais de partidas ranqueadas")
+    @app_commands.describe(
+        canal_botao="O canal onde será enviado o botão de ranqueada",
+        canal_inscricao="O canal onde as inscrições vão ocorrer",
+        canal_confronto="O canal onde os confrontos serão enviados"
+    )
+    async def config_ranqueada(
+        self,
+        interact: discord.Interaction,
+        canal_botao: discord.TextChannel,
+        canal_inscricao: discord.TextChannel,
+        canal_confronto: discord.TextChannel
+    ):
         await interact.response.defer(ephemeral=True)
         load = Embed(
             description=f" {emojis.LOADING} | Carregando... ",
@@ -21,18 +31,43 @@ class ConfigRanqueada(Cog):
         guild = db.session.query(db.Guild_Config).filter_by(guild_id=interact.guild.id).first()
         if guild:
             if interact.user.get_role(guild.perm_cmd_role_id) or interact.user.id == config_bot.OWNER_ID:
-                antigo = guild.ranqueada_channel_id
-                antigo_channel = interact.guild.get_channel(antigo) if antigo else None
+                # Canais antigos
+                antigo_botao = interact.guild.get_channel(guild.ranqueada_channel_id) if guild.ranqueada_channel_id else None
+                antigo_inscricao = interact.guild.get_channel(guild.ranqueada_inscricao_channel_id) if guild.ranqueada_inscricao_channel_id else None
+                antigo_confronto = interact.guild.get_channel(guild.ranqueada_confronto_channel_id) if guild.ranqueada_confronto_channel_id else None
 
-                guild.ranqueada_channel_id = canal.id
+                # Atualizar canais
+                guild.ranqueada_channel_id = canal_botao.id
+                guild.ranqueada_inscricao_channel_id = canal_inscricao.id
+                guild.ranqueada_confronto_channel_id = canal_confronto.id
                 db.session.commit()
 
                 sucess = Embed(
-                    title=f"{emojis.SUCESS} | Canal de ranqueada configurado!",
+                    title=f"{emojis.SUCESS} | Canais de ranqueada configurados!",
                     color=discord.Color.green()
                 )
-                sucess.add_field(name="Canal Antigo:", value=antigo_channel.mention if antigo_channel else "Não configurado", inline=False)
-                sucess.add_field(name="Canal Atual:", value=canal.mention, inline=False)
+
+                # Canal do botão
+                sucess.add_field(
+                    name="Canal do Botão:",
+                    value=f"{antigo_botao.mention if antigo_botao else 'Não configurado'} → {canal_botao.mention}",
+                    inline=False
+                )
+
+                # Canal de inscrições
+                sucess.add_field(
+                    name="Canal de Inscrições:",
+                    value=f"{antigo_inscricao.mention if antigo_inscricao else 'Não configurado'} → {canal_inscricao.mention}",
+                    inline=False
+                )
+
+                # Canal de confrontos
+                sucess.add_field(
+                    name="Canal de Confrontos:",
+                    value=f"{antigo_confronto.mention if antigo_confronto else 'Não configurado'} → {canal_confronto.mention}",
+                    inline=False
+                )
+
                 await interact.edit_original_response(embed=sucess)
 
             else:

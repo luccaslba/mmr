@@ -35,8 +35,10 @@ class Guild_Config(Base):
     match_close_count = Column("match_close_count", Integer)
     bdf_role_id = Column("bdf_role_id", Integer, nullable=True)
     ranqueada_channel_id = Column("ranqueada_channel_id", Integer, nullable=True)
+    ranqueada_inscricao_channel_id = Column("ranqueada_inscricao_channel_id", Integer, nullable=True)
+    ranqueada_confronto_channel_id = Column("ranqueada_confronto_channel_id", Integer, nullable=True)
 
-    def __init__(self, guild_id, guild_name, mrr_channel_id, matchmaking_channel_id, perm_cmd_role_id, match_close_count, confronto_channel_id, bdf_role_id=None, ranqueada_channel_id=None):
+    def __init__(self, guild_id, guild_name, mrr_channel_id, matchmaking_channel_id, perm_cmd_role_id, match_close_count, confronto_channel_id, bdf_role_id=None, ranqueada_channel_id=None, ranqueada_inscricao_channel_id=None, ranqueada_confronto_channel_id=None):
         self.guild_id = guild_id
         self.guild_name = guild_name
         self.mrr_channel_id = mrr_channel_id
@@ -46,6 +48,8 @@ class Guild_Config(Base):
         self.confronto_channel_id = confronto_channel_id
         self.bdf_role_id = bdf_role_id
         self.ranqueada_channel_id = ranqueada_channel_id
+        self.ranqueada_inscricao_channel_id = ranqueada_inscricao_channel_id
+        self.ranqueada_confronto_channel_id = ranqueada_confronto_channel_id
 
 class CloseMatchMember(Base):
     __tablename__ = "CloseMatchMember"

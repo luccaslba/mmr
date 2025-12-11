@@ -61,9 +61,13 @@ class ConfirmarParticipacaoView(View):
         if not config:
             return await interaction.response.send_message("Servidor não configurado.", ephemeral=True)
 
-        channel = interaction.guild.get_channel(config.matchmaking_channel_id)
+        # Usar canal de inscrição da ranqueada
+        if not config.ranqueada_inscricao_channel_id:
+            return await interaction.response.send_message("Canal de inscrições da ranqueada não configurado. Use `/config_ranqueada`.", ephemeral=True)
+
+        channel = interaction.guild.get_channel(config.ranqueada_inscricao_channel_id)
         if not channel:
-            return await interaction.response.send_message("Canal de matchmaking não encontrado.", ephemeral=True)
+            return await interaction.response.send_message("Canal de inscrições da ranqueada não encontrado.", ephemeral=True)
 
         # Criar lista de inscritos
         inscritos = []
@@ -80,17 +84,21 @@ class ConfirmarParticipacaoView(View):
         # Criar embed da ranqueada
         embed = self.criar_embed_ranqueada(inscritos, 300)  # 5 minutos = 300 segundos
 
+        # Obter canal de confronto
+        confronto_channel = interaction.guild.get_channel(config.ranqueada_confronto_channel_id) if config.ranqueada_confronto_channel_id else None
+
         # Criar view de inscrição
         view = InscricaoRanqueadaView(
             self.bot,
             self.organizador,
             self.formato,
             inscritos,
-            organizador_participando
+            organizador_participando,
+            confronto_channel
         )
 
         await interaction.response.edit_message(
-            embed=Embed(title="✅ Ranqueada criada!", description=f"Veja no canal de matchmaking.", color=discord.Color.green()),
+            embed=Embed(title="✅ Ranqueada criada!", description=f"Veja no canal {channel.mention}.", color=discord.Color.green()),
             view=None
         )
 
@@ -139,13 +147,14 @@ class ConfirmarParticipacaoView(View):
 
 class InscricaoRanqueadaView(View):
     """View para inscrição na ranqueada com timer"""
-    def __init__(self, bot, organizador, formato, inscritos, organizador_participando):
+    def __init__(self, bot, organizador, formato, inscritos, organizador_participando, confronto_channel=None):
         super().__init__(timeout=None)
         self.bot = bot
         self.organizador = organizador
         self.formato = formato
         self.inscritos = inscritos
         self.organizador_participando = organizador_participando
+        self.confronto_channel = confronto_channel
         self.message = None
         self.finalizado = False
         self.tempo_restante = 300  # 5 minutos
@@ -356,11 +365,19 @@ class InscricaoRanqueadaView(View):
             "ranqueada"
         )
 
-        await self.message.edit(embed=embed, view=view)
+        # Atualizar embed no canal de inscrição
+        await self.message.edit(embed=embed, view=None)
 
-        # Mencionar jogadores
+        # Mencionar jogadores no canal de inscrição
         mencoes = " ".join([j['user'].mention for j in jogadores_selecionados])
         await channel.send(f"🎮 **Ranqueada iniciada!** {mencoes}")
+
+        # Enviar para o canal de confronto se configurado
+        if self.confronto_channel:
+            confronto_msg = await self.confronto_channel.send(embed=embed, view=view)
+        else:
+            # Se não tiver canal de confronto, usa o canal de inscrição
+            confronto_msg = await channel.send(embed=embed, view=view)
 
     async def cancelar_por_falta_jogadores(self, channel):
         """Cancela se não tiver jogadores suficientes"""

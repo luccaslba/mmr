@@ -29,6 +29,18 @@ def run_auto_migrations():
             conn.commit()
             print("✅ Migração: coluna bdf_role_id adicionada")
 
+        # Migração: ranqueada_inscricao_channel_id
+        if 'ranqueada_inscricao_channel_id' not in columns:
+            cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_inscricao_channel_id INTEGER")
+            conn.commit()
+            print("✅ Migração: coluna ranqueada_inscricao_channel_id adicionada")
+
+        # Migração: ranqueada_confronto_channel_id
+        if 'ranqueada_confronto_channel_id' not in columns:
+            cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_confronto_channel_id INTEGER")
+            conn.commit()
+            print("✅ Migração: coluna ranqueada_confronto_channel_id adicionada")
+
         conn.close()
         print("✅ Migrações verificadas com sucesso")
     except Exception as e:
@@ -117,7 +129,23 @@ async def migrate(ctx: commands.Context):
             else:
                 migracoes_desnecessarias.append("Coluna `ranqueada_channel_id` já existe")
 
-            # Migração 3: Criar tabela ConstantesK
+            # Migração 3: Adicionar coluna ranqueada_inscricao_channel_id
+            if 'ranqueada_inscricao_channel_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_inscricao_channel_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `ranqueada_inscricao_channel_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `ranqueada_inscricao_channel_id` já existe")
+
+            # Migração 4: Adicionar coluna ranqueada_confronto_channel_id
+            if 'ranqueada_confronto_channel_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_confronto_channel_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `ranqueada_confronto_channel_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `ranqueada_confronto_channel_id` já existe")
+
+            # Migração 5: Criar tabela ConstantesK
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ConstantesK'")
             tabela_existe = cursor.fetchone()
 
