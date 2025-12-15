@@ -325,76 +325,10 @@ class ConfirmarClassificacaoView(View):
         )
 
 
-class AdicionarJogadorModal(Modal):
-    """Modal para adicionar jogador por ID ou menção"""
-    def __init__(self, gerenciar_view):
-        super().__init__(title="Adicionar Jogador")
-        self.gerenciar_view = gerenciar_view
-
-        self.jogador_input = TextInput(
-            label="ID do Discord ou @menção",
-            placeholder="Ex: 123456789012345678 ou @usuario",
-            required=True,
-            max_length=50
-        )
-        self.add_item(self.jogador_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        valor = self.jogador_input.value.strip()
-
-        # Extrair ID da menção ou usar direto
-        if valor.startswith("<@") and valor.endswith(">"):
-            # Formato de menção: <@123456789> ou <@!123456789>
-            user_id = valor.replace("<@", "").replace("!", "").replace(">", "")
-        else:
-            user_id = valor
-
-        try:
-            user_id = int(user_id)
-        except ValueError:
-            return await interaction.response.send_message(
-                f"❌ ID inválido! Use o ID numérico ou mencione o usuário (@usuario).",
-                ephemeral=True
-            )
-
-        # Verificar se já está na lista
-        if user_id in self.gerenciar_view.jogadores_ids:
-            return await interaction.response.send_message(
-                f"❌ Este jogador já está na lista!",
-                ephemeral=True
-            )
-
-        # Buscar membro no servidor
-        member = interaction.guild.get_member(user_id)
-        if not member:
-            return await interaction.response.send_message(
-                f"❌ Usuário não encontrado no servidor!",
-                ephemeral=True
-            )
-
-        # Verificar se está registrado no bot
-        user_db = session.query(Users).filter_by(discord_id=user_id).first()
-        if not user_db:
-            # Auto-registrar o usuário
-            user_db = Users(user_id, member.name, 0, interaction.guild.id)
-            session.add(user_db)
-            session.commit()
-
-        # Adicionar à lista
-        self.gerenciar_view.jogadores_ids.append(user_id)
-
-        await interaction.response.send_message(
-            f"✅ **{member.display_name}** adicionado à lista! (MMR: {user_db.MRR})",
-            ephemeral=True
-        )
-
-        # Atualizar embed
-        await self.gerenciar_view.atualizar_embed(interaction)
-
-
 class RemoverJogadorSelect(Select):
     """Dropdown para selecionar jogador a remover"""
-    def __init__(self, jogadores_ids, guild):
+    def __init__(self, jogadores_ids, guild, gerenciar_view):
+        self.gerenciar_view = gerenciar_view
         options = []
         for user_id in jogadores_ids[:25]:  # Limite de 25 opções
             member = guild.get_member(user_id)
@@ -419,21 +353,20 @@ class RemoverJogadorSelect(Select):
         if self.values[0] == "none":
             return await interaction.response.defer()
 
-        view: GerenciarJogadoresView = self.view
         user_id = int(self.values[0])
 
-        if user_id in view.jogadores_ids:
-            view.jogadores_ids.remove(user_id)
+        if user_id in self.gerenciar_view.jogadores_ids:
+            self.gerenciar_view.jogadores_ids.remove(user_id)
             member = interaction.guild.get_member(user_id)
             nome = member.display_name if member else "Desconhecido"
 
-            await interaction.response.send_message(
+            # Atualizar embed principal
+            await self.gerenciar_view.atualizar_embed_principal(interaction)
+
+            await interaction.followup.send(
                 f"✅ **{nome}** removido da lista!",
                 ephemeral=True
             )
-
-            # Atualizar embed
-            await view.atualizar_embed(interaction)
         else:
             await interaction.response.send_message(
                 f"❌ Jogador não encontrado na lista!",
@@ -441,9 +374,27 @@ class RemoverJogadorSelect(Select):
             )
 
 
+class RemoverJogadorView(View):
+    """View temporária para mostrar dropdown de remoção"""
+    def __init__(self, gerenciar_view, guild):
+        super().__init__(timeout=60)
+        self.gerenciar_view = gerenciar_view
+
+        # Adicionar select de remoção
+        select = RemoverJogadorSelect(gerenciar_view.jogadores_ids, guild, gerenciar_view)
+        self.add_item(select)
+
+    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.gray, emoji="◀️", row=1)
+    async def voltar(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.edit_message(
+            embed=self.gerenciar_view.criar_embed(interaction.guild),
+            view=self.gerenciar_view
+        )
+
+
 class GerenciarJogadoresView(View):
     """View para gerenciar jogadores (adicionar/remover)"""
-    def __init__(self, bot, autor, jogadores_ids, formato, tipo_evento, parent_view, original_message):
+    def __init__(self, bot, autor, jogadores_ids, formato, tipo_evento, parent_view, original_message, channel):
         super().__init__(timeout=300)
         self.bot = bot
         self.autor = autor
@@ -452,11 +403,13 @@ class GerenciarJogadoresView(View):
         self.tipo_evento = tipo_evento
         self.parent_view = parent_view
         self.original_message = original_message
+        self.channel = channel
         self.guild = None
+        self.aguardando_mencao = False
+        self.gerenciar_message = None
 
     def criar_embed(self, guild):
         self.guild = guild
-        tamanho_time = int(self.formato.split("x")[0])
 
         embed = Embed(
             title="⚙️ Gerenciar Jogadores",
@@ -492,42 +445,134 @@ class GerenciarJogadoresView(View):
 
         return embed
 
-    async def atualizar_embed(self, interaction: discord.Interaction):
+    async def atualizar_embed_principal(self, interaction: discord.Interaction):
         """Atualiza o embed após modificações"""
         embed = self.criar_embed(interaction.guild)
 
-        # Recriar view com select atualizado
-        new_view = GerenciarJogadoresView(
-            self.bot, self.autor, self.jogadores_ids,
-            self.formato, self.tipo_evento, self.parent_view, self.original_message
+        try:
+            await interaction.response.edit_message(embed=embed, view=self)
+        except:
+            try:
+                await interaction.message.edit(embed=embed, view=self)
+            except:
+                pass
+
+    @discord.ui.button(label="Adicionar Jogador", style=discord.ButtonStyle.green, emoji="➕", row=0)
+    async def adicionar(self, interaction: discord.Interaction, button: Button):
+        # Verificar se é o organizador
+        if interaction.user.id != self.autor.id:
+            return await interaction.response.send_message(
+                f"❌ Apenas o organizador ({self.autor.mention}) pode gerenciar jogadores!",
+                ephemeral=True
+            )
+
+        self.aguardando_mencao = True
+
+        # Enviar mensagem no canal pedindo menção
+        embed = Embed(
+            title="➕ Adicionar Jogador",
+            description=f"{interaction.user.mention}, **mencione o jogador** que deseja adicionar.\n\nEx: `@jogador`\n\n*Você tem 30 segundos para responder.*",
+            color=discord.Color.green()
         )
-        new_view.guild = interaction.guild
-        new_view._adicionar_select(interaction.guild)
+
+        await interaction.response.send_message(embed=embed)
+        prompt_msg = await interaction.original_response()
+
+        # Aguardar resposta com menção
+        def check(m):
+            return (
+                m.author.id == interaction.user.id and
+                m.channel.id == interaction.channel.id and
+                len(m.mentions) > 0
+            )
 
         try:
-            await interaction.message.edit(embed=embed, view=new_view)
-        except:
-            pass
+            msg = await self.bot.wait_for('message', timeout=30.0, check=check)
 
-    def _adicionar_select(self, guild):
-        """Adiciona o select de remoção"""
-        # Remover select antigo se existir
-        for item in self.children[:]:
-            if isinstance(item, RemoverJogadorSelect):
-                self.remove_item(item)
+            mentioned_user = msg.mentions[0]
+            user_id = mentioned_user.id
 
-        # Adicionar novo select
-        if self.jogadores_ids:
-            select = RemoverJogadorSelect(self.jogadores_ids, guild)
-            self.add_item(select)
+            # Deletar mensagens
+            try:
+                await prompt_msg.delete()
+                await msg.delete()
+            except:
+                pass
 
-    @discord.ui.button(label="Adicionar Jogador", style=discord.ButtonStyle.green, emoji="➕", row=1)
-    async def adicionar(self, interaction: discord.Interaction, button: Button):
-        modal = AdicionarJogadorModal(self)
-        await interaction.response.send_modal(modal)
+            # Verificar se já está na lista
+            if user_id in self.jogadores_ids:
+                return await interaction.channel.send(
+                    f"❌ **{mentioned_user.display_name}** já está na lista!",
+                    delete_after=5
+                )
+
+            # Verificar se está registrado no bot
+            user_db = session.query(Users).filter_by(discord_id=user_id).first()
+            if not user_db:
+                # Auto-registrar o usuário
+                user_db = Users(user_id, mentioned_user.name, 0, interaction.guild.id)
+                session.add(user_db)
+                session.commit()
+
+            # Adicionar à lista
+            self.jogadores_ids.append(user_id)
+
+            await interaction.channel.send(
+                f"✅ **{mentioned_user.display_name}** adicionado à lista! (MMR: {user_db.MRR})",
+                delete_after=5
+            )
+
+            # Atualizar embed
+            embed = self.criar_embed(interaction.guild)
+            if self.gerenciar_message:
+                try:
+                    await self.gerenciar_message.edit(embed=embed, view=self)
+                except:
+                    pass
+
+        except Exception as e:
+            try:
+                await prompt_msg.delete()
+            except:
+                pass
+            await interaction.channel.send("❌ Tempo esgotado ou erro ao adicionar jogador.", delete_after=5)
+
+        self.aguardando_mencao = False
+
+    @discord.ui.button(label="Remover Jogador", style=discord.ButtonStyle.red, emoji="➖", row=0)
+    async def remover(self, interaction: discord.Interaction, button: Button):
+        # Verificar se é o organizador
+        if interaction.user.id != self.autor.id:
+            return await interaction.response.send_message(
+                f"❌ Apenas o organizador ({self.autor.mention}) pode gerenciar jogadores!",
+                ephemeral=True
+            )
+
+        if not self.jogadores_ids:
+            return await interaction.response.send_message(
+                "❌ Não há jogadores para remover!",
+                ephemeral=True
+            )
+
+        # Mostrar view com dropdown de remoção
+        view = RemoverJogadorView(self, interaction.guild)
+        embed = Embed(
+            title="➖ Remover Jogador",
+            description="Selecione o jogador que deseja remover:",
+            color=discord.Color.red()
+        )
+
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Confirmar Alterações", style=discord.ButtonStyle.blurple, emoji="✅", row=1)
     async def confirmar(self, interaction: discord.Interaction, button: Button):
+        # Verificar se é o organizador
+        if interaction.user.id != self.autor.id:
+            return await interaction.response.send_message(
+                f"❌ Apenas o organizador ({self.autor.mention}) pode gerenciar jogadores!",
+                ephemeral=True
+            )
+
         if len(self.jogadores_ids) < 2:
             return await interaction.response.send_message(
                 "❌ É necessário pelo menos 2 jogadores!",
@@ -581,7 +626,7 @@ class GerenciarJogadoresView(View):
         except:
             pass
 
-    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.red, emoji="❌", row=1)
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.gray, emoji="❌", row=1)
     async def cancelar(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message("❌ Alterações canceladas.", ephemeral=True)
         try:
@@ -601,27 +646,24 @@ class FinalizarMatchmaking(View):
 
     @discord.ui.button(label="Gerenciar Jogadores", style=discord.ButtonStyle.gray, emoji="⚙️", custom_id="gerenciar_jogadores")
     async def gerenciar_jogadores(self, interaction: discord.Interaction, btn: Button):
-        # Verificar permissão
-        guild = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
-        if guild:
-            perm_role = interaction.guild.get_role(guild.perm_cmd_role_id)
-            if interaction.user.id != self.autor.id and interaction.user.id != config_bot.OWNER_ID and not interaction.user.get_role(guild.perm_cmd_role_id):
-                failed = Embed(
-                    title=f"{emojis.FAILED} | Você não possui permissão!",
-                    description=f"**Apenas: {self.autor.mention} ou pessoas com o cargo: {perm_role.mention}, podem usar esse botão**",
-                    color=discord.Color.red()
-                )
-                return await interaction.response.send_message(embed=failed, ephemeral=True)
+        # Apenas o organizador pode gerenciar
+        if interaction.user.id != self.autor.id:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Você não possui permissão!",
+                description=f"**Apenas o organizador ({self.autor.mention}) pode gerenciar jogadores.**",
+                color=discord.Color.red()
+            )
+            return await interaction.response.send_message(embed=failed, ephemeral=True)
 
         # Criar view de gerenciamento
         view = GerenciarJogadoresView(
             self.bot, self.autor, self.jogadores_sorteados_ids,
-            self.formato, self.tipo_evento, self, interaction.message
+            self.formato, self.tipo_evento, self, interaction.message, interaction.channel
         )
-        view._adicionar_select(interaction.guild)
         embed = view.criar_embed(interaction.guild)
 
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=view)
+        view.gerenciar_message = await interaction.original_response()
 
     @discord.ui.button(label="Gerar Confrontos", style=discord.ButtonStyle.blurple, emoji="⚔️", custom_id="gerar_confrontos")
     async def gerar_confrontos(self, interaction: discord.Interaction, btn: Button):
