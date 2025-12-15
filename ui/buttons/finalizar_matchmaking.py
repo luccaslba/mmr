@@ -644,6 +644,91 @@ class FinalizarMatchmaking(View):
         self.formato = formato
         self.tipo_evento = tipo_evento
 
+    @discord.ui.button(label="Transferir", style=discord.ButtonStyle.gray, emoji="👑", custom_id="transferir_organizador")
+    async def transferir_organizador(self, interaction: discord.Interaction, btn: Button):
+        # Apenas o organizador pode transferir
+        if interaction.user.id != self.autor.id:
+            failed = Embed(
+                title=f"{emojis.FAILED} | Você não possui permissão!",
+                description=f"**Apenas o organizador ({self.autor.mention}) pode transferir o evento.**",
+                color=discord.Color.red()
+            )
+            return await interaction.response.send_message(embed=failed, ephemeral=True)
+
+        # Enviar mensagem pedindo menção do novo organizador
+        embed = Embed(
+            title="👑 Transferir Organização",
+            description=f"{interaction.user.mention}, **mencione o novo organizador** do evento.\n\nEx: `@novo_organizador`\n\n*Você tem 30 segundos para responder.*",
+            color=discord.Color.gold()
+        )
+
+        await interaction.response.send_message(embed=embed)
+        prompt_msg = await interaction.original_response()
+
+        # Aguardar resposta com menção
+        def check(m):
+            return (
+                m.author.id == interaction.user.id and
+                m.channel.id == interaction.channel.id and
+                len(m.mentions) > 0
+            )
+
+        try:
+            msg = await self.bot.wait_for('message', timeout=30.0, check=check)
+
+            novo_organizador = msg.mentions[0]
+
+            # Deletar mensagens
+            try:
+                await prompt_msg.delete()
+                await msg.delete()
+            except:
+                pass
+
+            # Verificar se não é bot
+            if novo_organizador.bot:
+                return await interaction.channel.send(
+                    "❌ Você não pode transferir para um bot!",
+                    delete_after=5
+                )
+
+            # Verificar se não é ele mesmo
+            if novo_organizador.id == self.autor.id:
+                return await interaction.channel.send(
+                    "❌ Você já é o organizador!",
+                    delete_after=5
+                )
+
+            # Atualizar organizador
+            organizador_antigo = self.autor
+            self.autor = novo_organizador
+
+            # Atualizar embed da mensagem original
+            embed_atual = interaction.message.embeds[0] if interaction.message.embeds else None
+            if embed_atual:
+                # Atualizar descrição com novo organizador
+                nova_descricao = embed_atual.description.replace(
+                    organizador_antigo.mention, novo_organizador.mention
+                ) if embed_atual.description else f"**Organizador:** {novo_organizador.mention}"
+                embed_atual.description = nova_descricao
+
+                try:
+                    await interaction.message.edit(embed=embed_atual, view=self)
+                except:
+                    pass
+
+            await interaction.channel.send(
+                f"👑 **{organizador_antigo.display_name}** transferiu a organização do evento para **{novo_organizador.mention}**!",
+                delete_after=10
+            )
+
+        except Exception as e:
+            try:
+                await prompt_msg.delete()
+            except:
+                pass
+            await interaction.channel.send("❌ Tempo esgotado ou erro ao transferir.", delete_after=5)
+
     @discord.ui.button(label="Gerenciar Jogadores", style=discord.ButtonStyle.gray, emoji="⚙️", custom_id="gerenciar_jogadores")
     async def gerenciar_jogadores(self, interaction: discord.Interaction, btn: Button):
         # Apenas o organizador pode gerenciar
