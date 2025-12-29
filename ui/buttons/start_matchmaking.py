@@ -1,7 +1,7 @@
-import discord, emojis, asyncio, pytz, functions
+import discord, emojis, asyncio, pytz, functions, config_bot
 from datetime import datetime, timezone, time
 from discord import Embed
-from discord.ui import View, Button, Modal, TextInput, Select
+from discord.ui import View, Button, Modal, TextInput, Select, UserSelect
 from db import session, Users, Guild_Config, CargosPremiacao
 
 # Modal simplificado - apenas Data e Horário
@@ -109,7 +109,22 @@ class DataHorarioModal(Modal, title="Data e Horário do Evento"):
         if not channel:
             return await interaction.followup.send("Canal de matchmaking não encontrado.", ephemeral=True)
 
-        message = await channel.send(embed=embed)
+        # Criar view de gerenciamento do evento (será preenchida com message_id após enviar)
+        gerenciar_view = GerenciarEventoView(
+            self.bot,
+            interaction.user,
+            0,  # message_id será atualizado após enviar
+            self.formato,
+            self.vagas,
+            self.tipo_evento,
+            datahora,
+            self.modo_sorteio
+        )
+
+        message = await channel.send(embed=embed, view=gerenciar_view)
+
+        # Atualizar message_id na view
+        gerenciar_view.message_id = message.id
 
         # BDF não usa reações
         if self.tipo_evento != "bdf":
@@ -129,7 +144,7 @@ class DataHorarioModal(Modal, title="Data e Horário do Evento"):
             ))
 
         await interaction.followup.send(
-            f"✅ Torneio {self.formato} criado com **{self.vagas} vagas**!\n"
+            f"✅ Torneio {self.formato} criado com **{self.vagas} vagas** no canal {channel.mention}!\n"
             f"{'📋 Adicione os participantes manualmente.' if self.tipo_evento == 'bdf' else ''}",
             ephemeral=True
         )
@@ -548,3 +563,143 @@ class StartMatchMakingV2(View):
         )
         view = FormatoView(self.bot)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+# View para gerenciar evento (Transferir/Cancelar) - apenas organizador
+class GerenciarEventoView(View):
+    def __init__(self, bot, organizador, message_id: int, formato: str, vagas: int, tipo_evento: str, datahora, modo_sorteio: str):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.organizador = organizador
+        self.message_id = message_id
+        self.formato = formato
+        self.vagas = vagas
+        self.tipo_evento = tipo_evento
+        self.datahora = datahora
+        self.modo_sorteio = modo_sorteio
+        self.cancelado = False
+
+    @discord.ui.button(label="Transferir Organizador", style=discord.ButtonStyle.blurple, emoji="🔄", custom_id="evento_transferir", row=0)
+    async def btn_transferir(self, interaction: discord.Interaction, button: Button):
+        # Apenas organizador ou OWNER pode transferir
+        if interaction.user.id != self.organizador.id and interaction.user.id != config_bot.OWNER_ID:
+            return await interaction.response.send_message("❌ Apenas o organizador pode transferir o evento!", ephemeral=True)
+
+        if self.cancelado:
+            return await interaction.response.send_message("❌ Este evento já foi cancelado!", ephemeral=True)
+
+        # Enviar select para escolher novo organizador
+        view = TransferirOrganizadorView(self, interaction.user)
+        await interaction.response.send_message(
+            "👤 Selecione o novo organizador do evento:",
+            view=view,
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="Cancelar Evento", style=discord.ButtonStyle.red, emoji="🗑️", custom_id="evento_cancelar", row=0)
+    async def btn_cancelar(self, interaction: discord.Interaction, button: Button):
+        # Apenas organizador ou OWNER pode cancelar
+        if interaction.user.id != self.organizador.id and interaction.user.id != config_bot.OWNER_ID:
+            return await interaction.response.send_message("❌ Apenas o organizador pode cancelar o evento!", ephemeral=True)
+
+        if self.cancelado:
+            return await interaction.response.send_message("❌ Este evento já foi cancelado!", ephemeral=True)
+
+        self.cancelado = True
+
+        # Atualizar embed original para mostrar que foi cancelado
+        embed = Embed(
+            title="❌ Evento Cancelado",
+            description=f"Este evento foi cancelado por {interaction.user.mention}.",
+            color=discord.Color.red()
+        )
+
+        await interaction.message.edit(embed=embed, view=None)
+        await interaction.response.send_message("✅ Evento cancelado com sucesso!", ephemeral=True)
+
+
+class TransferirOrganizadorSelect(UserSelect):
+    def __init__(self, parent_view):
+        self.parent_view = parent_view
+        super().__init__(
+            placeholder="Selecione o novo organizador",
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        novo_organizador = self.values[0]
+
+        if novo_organizador.bot:
+            return await interaction.response.send_message("❌ Não é possível transferir para um bot!", ephemeral=True)
+
+        organizador_antigo = self.parent_view.evento_view.organizador
+
+        # Atualizar organizador
+        self.parent_view.evento_view.organizador = novo_organizador
+
+        # Atualizar embed com novo organizador
+        message = interaction.message
+        if self.parent_view.evento_view.message_id:
+            try:
+                channel = interaction.channel
+                original_message = await channel.fetch_message(self.parent_view.evento_view.message_id)
+
+                # Recriar embed com novo organizador
+                tipo_nome = {
+                    "aberto": "Aberto",
+                    "fechado": "Fechado",
+                    "bdf": "BDF"
+                }.get(self.parent_view.evento_view.tipo_evento, self.parent_view.evento_view.tipo_evento)
+
+                formato = self.parent_view.evento_view.formato
+                vagas = self.parent_view.evento_view.vagas
+                datahora = self.parent_view.evento_view.datahora
+
+                jogadores_por_time = int(formato.split("x")[0])
+                if formato == "1x1":
+                    texto_vagas = f"**Vagas:** `{vagas} jogadores`"
+                else:
+                    total_pessoas = vagas * jogadores_por_time
+                    texto_vagas = f"**Vagas:** `{vagas} equipes` ({total_pessoas} pessoas)"
+
+                if self.parent_view.evento_view.tipo_evento == "bdf":
+                    instrucao = f"⚔️ **Evento BDF - Vagas Garantidas**\nO organizador irá adicionar os participantes manualmente."
+                else:
+                    instrucao = "Reaja com ✅ para participar!"
+
+                embed = Embed(
+                    title=f"🏆 Torneio {formato} - {tipo_nome}",
+                    description=(
+                        f"**Organizador:** {novo_organizador.mention}\n"
+                        f"**Formato:** `{formato}`\n"
+                        f"{texto_vagas}\n"
+                        f"**Data:** `{datahora.strftime('%d/%m/%Y')}` às `{datahora.strftime('%H:%M')}`\n"
+                        f"**🎁 Premiação:** Pontos no Ranking\n\n"
+                        f"{instrucao}"
+                    ),
+                    color=discord.Color.gold() if self.parent_view.evento_view.tipo_evento == "bdf" else discord.Color.green()
+                )
+                embed.set_footer(text=f"Organizado por {novo_organizador.name}", icon_url=novo_organizador.display_avatar.url)
+
+                await original_message.edit(embed=embed, view=self.parent_view.evento_view)
+
+            except Exception as e:
+                print(f"Erro ao atualizar mensagem: {e}")
+
+        await interaction.response.edit_message(
+            content=f"✅ Organizador transferido de {organizador_antigo.mention} para {novo_organizador.mention}!",
+            view=None
+        )
+
+
+class TransferirOrganizadorView(View):
+    def __init__(self, evento_view, user):
+        super().__init__(timeout=60)
+        self.evento_view = evento_view
+        self.user = user
+        self.add_item(TransferirOrganizadorSelect(self))
+
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.gray, emoji="❌", row=1)
+    async def cancelar(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.edit_message(content="❌ Transferência cancelada.", view=None)
