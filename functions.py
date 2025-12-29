@@ -1,7 +1,7 @@
 import asyncio, discord, random, pytz
 from datetime import datetime, timezone, date
 from sqlalchemy.orm import sessionmaker
-from db import session, Users, Guild_Config, CloseMatchMember, MatchParticipantes, MatchPartidaParticipantes, RolesVips, ConstantesK
+from db import session, Users, Guild_Config, CloseMatchMember, MatchParticipantes, MatchPartidaParticipantes, RolesVips, ConstantesK, UsersWeekly
 from discord import Embed
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
 
@@ -321,6 +321,17 @@ async def finalizar_torneio(session, autor_id, classificacao, participantes, for
             mmr_novo = max(0, mmr_antigo + int(delta_mmr))
             user_db.MRR = mmr_novo
 
+            # Atualizar ranking semanal também
+            user_weekly = session.query(UsersWeekly).filter_by(discord_id=user_id, guild_id=user_db.guild_id).first()
+            if not user_weekly:
+                # Criar registro semanal se não existir
+                user_weekly = UsersWeekly(user_id, user_db.discord_name, 0, user_db.guild_id)
+                session.add(user_weekly)
+
+            mmr_weekly_antigo = user_weekly.MRR
+            mmr_weekly_novo = max(0, mmr_weekly_antigo + int(delta_mmr))
+            user_weekly.MRR = mmr_weekly_novo
+
             resultados[posicao] = {
                 'user_id': user_id,
                 'mmr_antigo': mmr_antigo,
@@ -397,6 +408,17 @@ async def finalizar_torneio_times(session, autor_id, classificacao_por_jogador, 
             # Atualizar MMR (mínimo 0, não permite negativo)
             mmr_novo = max(0, mmr_antigo + int(delta_mmr))
             user_db.MRR = mmr_novo
+
+            # Atualizar ranking semanal também
+            user_weekly = session.query(UsersWeekly).filter_by(discord_id=user_id, guild_id=user_db.guild_id).first()
+            if not user_weekly:
+                # Criar registro semanal se não existir
+                user_weekly = UsersWeekly(user_id, user_db.discord_name, 0, user_db.guild_id)
+                session.add(user_weekly)
+
+            mmr_weekly_antigo = user_weekly.MRR
+            mmr_weekly_novo = max(0, mmr_weekly_antigo + int(delta_mmr))
+            user_weekly.MRR = mmr_weekly_novo
 
             resultados[user_id] = {
                 'user_id': user_id,

@@ -157,4 +157,21 @@ class CargosPremiacao(Base):
         self.role_name = role_name
 
 
+class UsersWeekly(Base):
+    """Ranking semanal - mesma estrutura do Users, resetável independentemente"""
+    __tablename__ = "UsersWeekly"
+
+    id = Column("id", Integer, primary_key=True)
+    discord_id = Column("discord_id", Integer)
+    discord_name = Column("discord_name", String)
+    MRR = Column("MRR", Integer)
+    guild_id = Column("guild_id", Integer)
+
+    def __init__(self, discord_id, discord_name, MRR, guild_id):
+        self.discord_id = discord_id
+        self.discord_name = discord_name
+        self.MRR = MRR
+        self.guild_id = guild_id
+
+
 Base.metadata.create_all(bind=db)
