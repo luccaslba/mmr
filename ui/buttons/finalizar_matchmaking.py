@@ -1,7 +1,7 @@
 import discord, emojis, functions, config_bot, random
 from discord import Embed
 from discord.ui import View, Button, Modal, TextInput, Select
-from db import session, Users, Guild_Config, MatchParticipantes
+from db import session, Users, Guild_Config, MatchParticipantes, RanqueadaContador
 
 
 class JogadorSelect(Select):
@@ -243,8 +243,25 @@ class ConfirmarClassificacaoView(View):
         )
 
         if resultado['sucesso']:
+            # Se for ranqueada, incrementar contador e usar título especial
+            if self.tipo_evento == "ranqueada":
+                # Buscar ou criar contador
+                contador_db = session.query(RanqueadaContador).filter_by(guild_id=interaction.guild.id).first()
+                if not contador_db:
+                    contador_db = RanqueadaContador(interaction.guild.id, 0)
+                    session.add(contador_db)
+
+                # Incrementar contador
+                contador_db.contador += 1
+                session.commit()
+
+                numero_ranqueada = contador_db.contador
+                titulo = f"🏆 Ranqueada {numero_ranqueada:02d} Finalizada {self.formato}"
+            else:
+                titulo = f"🏆 Torneio Finalizado - {self.formato}"
+
             embed = Embed(
-                title=f"🏆 Torneio Finalizado - {self.formato}",
+                title=titulo,
                 description=f"**Organizador:** {self.autor.mention}\n**K usado:** {resultado.get('k_usado', 'N/A')}\n",
                 color=discord.Color.gold()
             )
@@ -280,10 +297,16 @@ class ConfirmarClassificacaoView(View):
 
             embed.set_footer(text=f"Organizado por {self.autor.name}", icon_url=self.autor.display_avatar.url)
 
-            # Enviar no canal de confrontos
+            # Enviar no canal de confrontos correto baseado no tipo de evento
             guild_config = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
-            if guild_config and guild_config.confronto_channel_id:
-                confronto_channel = interaction.guild.get_channel(guild_config.confronto_channel_id)
+            if guild_config:
+                # Se for ranqueada, usa o canal de confronto da ranqueada
+                if self.tipo_evento == "ranqueada" and guild_config.ranqueada_confronto_channel_id:
+                    confronto_channel = interaction.guild.get_channel(guild_config.ranqueada_confronto_channel_id)
+                else:
+                    # Senão, usa o canal de confronto padrão (eventos)
+                    confronto_channel = interaction.guild.get_channel(guild_config.confronto_channel_id)
+
                 if confronto_channel:
                     await confronto_channel.send(embed=embed)
 

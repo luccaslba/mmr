@@ -174,4 +174,17 @@ class UsersWeekly(Base):
         self.guild_id = guild_id
 
 
+class RanqueadaContador(Base):
+    """Contador sequencial de ranqueadas por servidor"""
+    __tablename__ = "RanqueadaContador"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer, unique=True)
+    contador = Column(Integer, default=0)
+
+    def __init__(self, guild_id, contador=0):
+        self.guild_id = guild_id
+        self.contador = contador
+
+
 Base.metadata.create_all(bind=db)
