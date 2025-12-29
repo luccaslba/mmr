@@ -141,4 +141,20 @@ class ConstantesK(Base):
         self.k_fechado = k_fechado
         self.k_bdf = k_bdf
 
+
+class CargosPremiacao(Base):
+    """Cargos permitidos para premiação em eventos"""
+    __tablename__ = "CargosPremiacao"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer)
+    role_id = Column(Integer)
+    role_name = Column(String)
+
+    def __init__(self, guild_id, role_id, role_name):
+        self.guild_id = guild_id
+        self.role_id = role_id
+        self.role_name = role_name
+
+
 Base.metadata.create_all(bind=db)

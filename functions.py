@@ -144,11 +144,10 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
     print(f"[Matchmaking] Jogadores que ficaram de fora: {len(jogadores) - len(jogadores_selecionados)}")
 
     if len(jogadores_selecionados) < total_pessoas_necessarias:
-        texto_formato = f"{vagas} vagas ({total_pessoas_necessarias} pessoas)" if formato != "1x1" else f"{vagas} jogadores"
         embed = discord.Embed(
             title="❌ Jogadores insuficientes!",
             description=(
-                f"Eram necessários pelo menos **{jogadores_por_partida}** jogadores para formar uma partida no formato `{formato}`.\n"
+                f"Eram necessários **{total_pessoas_necessarias}** jogadores para o torneio `{formato}` com **{vagas}** vagas.\n"
                 f"Apenas **{len(jogadores)}** reagiram ao evento válidos. Nenhuma partida foi formada."
             ),
             color=discord.Color.red()
@@ -318,15 +317,15 @@ async def finalizar_torneio(session, autor_id, classificacao, participantes, for
                 jogadores_quantity=num_jogadores
             )
 
-            # Atualizar MMR
-            mmr_novo = mmr_antigo + int(delta_mmr)
+            # Atualizar MMR (mínimo 0, não permite negativo)
+            mmr_novo = max(0, mmr_antigo + int(delta_mmr))
             user_db.MRR = mmr_novo
 
             resultados[posicao] = {
                 'user_id': user_id,
                 'mmr_antigo': mmr_antigo,
                 'mmr_novo': mmr_novo,
-                'delta_mmr': int(delta_mmr)
+                'delta_mmr': mmr_novo - mmr_antigo  # Delta real após limite
             }
 
         session.commit()
@@ -395,8 +394,8 @@ async def finalizar_torneio_times(session, autor_id, classificacao_por_jogador, 
                 jogadores_quantity=num_times  # Número de times, não de jogadores
             )
 
-            # Atualizar MMR
-            mmr_novo = mmr_antigo + int(delta_mmr)
+            # Atualizar MMR (mínimo 0, não permite negativo)
+            mmr_novo = max(0, mmr_antigo + int(delta_mmr))
             user_db.MRR = mmr_novo
 
             resultados[user_id] = {
@@ -404,7 +403,7 @@ async def finalizar_torneio_times(session, autor_id, classificacao_por_jogador, 
                 'posicao': posicao_time,
                 'mmr_antigo': mmr_antigo,
                 'mmr_novo': mmr_novo,
-                'delta_mmr': int(delta_mmr)
+                'delta_mmr': mmr_novo - mmr_antigo  # Delta real após limite
             }
 
         session.commit()

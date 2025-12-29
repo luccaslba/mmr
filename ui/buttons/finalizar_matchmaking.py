@@ -75,7 +75,7 @@ class JogadorSelect(Select):
 
 class ClassificacaoPorPosicaoView(View):
     """View que pergunta posição por posição"""
-    def __init__(self, bot, autor, participantes, formato, tipo_evento):
+    def __init__(self, bot, autor, participantes, formato, tipo_evento, parent_view=None):
         super().__init__(timeout=300)
         self.bot = bot
         self.autor = autor
@@ -84,6 +84,7 @@ class ClassificacaoPorPosicaoView(View):
         self.formato = formato
         self.tipo_evento = tipo_evento
         self.classificacao = {}  # {posicao: [user_ids]}
+        self.parent_view = parent_view  # Referência para marcar como finalizado
 
         self.tamanho_time = int(formato.split("x")[0])
         self.num_vagas = len(participantes) // self.tamanho_time
@@ -199,7 +200,7 @@ class ClassificacaoPorPosicaoView(View):
         # Criar view com botões de confirmar/refazer
         view = ConfirmarClassificacaoView(
             self.bot, self.autor, self.participantes,
-            self.formato, self.tipo_evento, self.classificacao
+            self.formato, self.tipo_evento, self.classificacao, self.parent_view
         )
 
         await interaction.response.edit_message(embed=embed, view=view)
@@ -207,7 +208,7 @@ class ClassificacaoPorPosicaoView(View):
 
 class ConfirmarClassificacaoView(View):
     """View final para confirmar ou refazer a classificação"""
-    def __init__(self, bot, autor, participantes, formato, tipo_evento, classificacao):
+    def __init__(self, bot, autor, participantes, formato, tipo_evento, classificacao, parent_view=None):
         super().__init__(timeout=300)
         self.bot = bot
         self.autor = autor
@@ -215,6 +216,7 @@ class ConfirmarClassificacaoView(View):
         self.formato = formato
         self.tipo_evento = tipo_evento
         self.classificacao = classificacao
+        self.parent_view = parent_view  # Referência para marcar como finalizado
 
     @discord.ui.button(label="Confirmar", style=discord.ButtonStyle.green, emoji="✅")
     async def confirmar(self, interaction: discord.Interaction, button: Button):
@@ -298,6 +300,10 @@ class ConfirmarClassificacaoView(View):
                 session.delete(part)
             session.commit()
 
+            # Marcar torneio como finalizado para bloquear botões
+            if self.parent_view:
+                self.parent_view.finalizado = True
+
         else:
             failed = Embed(
                 title=f"{emojis.FAILED} | Erro ao finalizar!",
@@ -311,7 +317,7 @@ class ConfirmarClassificacaoView(View):
         # Reiniciar classificação
         view = ClassificacaoPorPosicaoView(
             self.bot, self.autor, self.participantes,
-            self.formato, self.tipo_evento
+            self.formato, self.tipo_evento, self.parent_view
         )
         embed = view.criar_embed_pergunta()
         await interaction.response.edit_message(embed=embed, view=view)
@@ -394,7 +400,7 @@ class RemoverJogadorView(View):
 
 class GerenciarJogadoresView(View):
     """View para gerenciar jogadores (adicionar/remover)"""
-    def __init__(self, bot, autor, jogadores_ids, formato, tipo_evento, parent_view, original_message, channel):
+    def __init__(self, bot, autor, jogadores_ids, formato, tipo_evento, parent_view, original_message, channel, max_jogadores=None):
         super().__init__(timeout=300)
         self.bot = bot
         self.autor = autor
@@ -407,6 +413,11 @@ class GerenciarJogadoresView(View):
         self.guild = None
         self.aguardando_mencao = False
         self.gerenciar_message = None
+        # Calcular máximo de jogadores baseado no formato se não foi passado
+        if max_jogadores is None:
+            self.max_jogadores = len(jogadores_ids)  # Usa o número atual como máximo
+        else:
+            self.max_jogadores = max_jogadores
 
     def criar_embed(self, guild):
         self.guild = guild
@@ -415,7 +426,7 @@ class GerenciarJogadoresView(View):
             title="⚙️ Gerenciar Jogadores",
             description=(
                 f"**Formato:** `{self.formato}`\n"
-                f"**Total:** `{len(self.jogadores_ids)}` jogadores\n\n"
+                f"**Total:** `{len(self.jogadores_ids)}/{self.max_jogadores}` jogadores\n\n"
                 "Use os botões abaixo para adicionar ou remover jogadores."
             ),
             color=discord.Color.blue()
@@ -463,6 +474,14 @@ class GerenciarJogadoresView(View):
         if interaction.user.id != self.autor.id:
             return await interaction.response.send_message(
                 f"❌ Apenas o organizador ({self.autor.mention}) pode gerenciar jogadores!",
+                ephemeral=True
+            )
+
+        # Verificar se já atingiu o máximo de jogadores
+        if len(self.jogadores_ids) >= self.max_jogadores:
+            return await interaction.response.send_message(
+                f"❌ O torneio já está com o máximo de **{self.max_jogadores}** jogadores!\n\n"
+                f"Para adicionar um novo jogador, primeiro **remova** quem não compareceu.",
                 ephemeral=True
             )
 
@@ -643,9 +662,17 @@ class FinalizarMatchmaking(View):
         self.jogadores_sorteados_ids = jogadores_sorteados_ids or []
         self.formato = formato
         self.tipo_evento = tipo_evento
+        self.finalizado = False  # Flag para impedir ações após finalizar
 
     @discord.ui.button(label="Transferir", style=discord.ButtonStyle.gray, emoji="👑", custom_id="transferir_organizador")
     async def transferir_organizador(self, interaction: discord.Interaction, btn: Button):
+        # Verificar se já foi finalizado
+        if self.finalizado:
+            return await interaction.response.send_message(
+                "❌ Este torneio já foi finalizado!",
+                ephemeral=True
+            )
+
         # Apenas o organizador pode transferir
         if interaction.user.id != self.autor.id:
             failed = Embed(
@@ -731,6 +758,13 @@ class FinalizarMatchmaking(View):
 
     @discord.ui.button(label="Gerenciar Jogadores", style=discord.ButtonStyle.gray, emoji="⚙️", custom_id="gerenciar_jogadores")
     async def gerenciar_jogadores(self, interaction: discord.Interaction, btn: Button):
+        # Verificar se já foi finalizado
+        if self.finalizado:
+            return await interaction.response.send_message(
+                "❌ Este torneio já foi finalizado!",
+                ephemeral=True
+            )
+
         # Apenas o organizador pode gerenciar
         if interaction.user.id != self.autor.id:
             failed = Embed(
@@ -752,6 +786,13 @@ class FinalizarMatchmaking(View):
 
     @discord.ui.button(label="Gerar Confrontos", style=discord.ButtonStyle.blurple, emoji="⚔️", custom_id="gerar_confrontos")
     async def gerar_confrontos(self, interaction: discord.Interaction, btn: Button):
+        # Verificar se já foi finalizado
+        if self.finalizado:
+            return await interaction.response.send_message(
+                "❌ Este torneio já foi finalizado!",
+                ephemeral=True
+            )
+
         # Verificar permissão
         guild = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
         if guild:
@@ -871,12 +912,17 @@ class FinalizarMatchmaking(View):
                 inline=False
             )
 
-        embed.set_footer(text="Clique em 'Gerar Confrontos' novamente para embaralhar")
-
         await interaction.response.send_message(embed=embed)
 
     @discord.ui.button(label="Finalizar Torneio", style=discord.ButtonStyle.green, emoji="🏆", custom_id="finalizar_torneio_v2")
     async def finalizar(self, interaction: discord.Interaction, btn: Button):
+        # Verificar se já foi finalizado
+        if self.finalizado:
+            return await interaction.response.send_message(
+                "❌ Este torneio já foi finalizado!",
+                ephemeral=True
+            )
+
         # Verificar permissão
         guild = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
         if guild:
@@ -926,7 +972,7 @@ class FinalizarMatchmaking(View):
         # Mostrar view de classificação por posição
         view = ClassificacaoPorPosicaoView(
             self.bot, self.autor, participantes,
-            self.formato, self.tipo_evento
+            self.formato, self.tipo_evento, parent_view=self
         )
         embed = view.criar_embed_pergunta()
 
