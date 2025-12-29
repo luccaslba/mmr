@@ -331,8 +331,8 @@ class TipoEventoSelect(Select):
 
         tipo_texto = {"aberto": "🌍 Aberto", "fechado": "🔒 Fechado", "bdf": "⚔️ BDF"}.get(tipo_evento, tipo_evento)
 
-        # Ir para seleção de cargo de premiação
-        view = CargoPremiacaoView(self.bot, self.formato, self.vagas, self.modo_sorteio, tipo_evento)
+        # Ir para seleção de cargo de premiação - passa guild_id aqui
+        view = CargoPremiacaoView(self.bot, self.formato, self.vagas, self.modo_sorteio, tipo_evento, interaction.guild.id)
 
         embed = Embed(
             title="⚙️ Configurar Matchmaking - Passo 5/6",
@@ -411,22 +411,16 @@ class FormatoView(View):
 
 
 class CargoPremiacaoView(View):
-    def __init__(self, bot, formato: str, vagas: int, modo_sorteio: str, tipo_evento: str):
+    def __init__(self, bot, formato: str, vagas: int, modo_sorteio: str, tipo_evento: str, guild_id: int):
         super().__init__(timeout=180)
         self.bot = bot
         self.formato = formato
         self.vagas = vagas
         self.modo_sorteio = modo_sorteio
         self.tipo_evento = tipo_evento
-        # guild_id será pego na interação
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Adicionar o select dinamicamente com guild_id
-        if not self.children or not any(isinstance(c, CargoPremiacaoSelect) for c in self.children):
-            self.add_item(CargoPremiacaoSelect(
-                self.bot, self.formato, self.vagas, self.modo_sorteio, self.tipo_evento, interaction.guild.id
-            ))
-        return True
+        self.guild_id = guild_id
+        # Adicionar o select já no __init__ com o guild_id
+        self.add_item(CargoPremiacaoSelect(bot, formato, vagas, modo_sorteio, tipo_evento, guild_id))
 
     @discord.ui.button(label="Voltar", style=discord.ButtonStyle.gray, emoji="⬅️", row=1)
     async def voltar(self, interaction: discord.Interaction, button: Button):
