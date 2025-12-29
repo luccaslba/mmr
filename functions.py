@@ -113,13 +113,13 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
     cargos_vip_db = session.query(RolesVips).order_by(RolesVips.peso.desc()).all()
     cargos_vip = {int(cargo.role_id): cargo.peso for cargo in cargos_vip_db}
 
-    # Jogadores com seus respectivos pesos
+    # Jogadores com seus respectivos pesos (soma todos os cargos VIP)
     jogadores_com_peso = []
     for jogador in jogadores:
         peso = 0
         for role in jogador.roles:
             if role.id in cargos_vip:
-                peso = max(peso, cargos_vip[role.id])  # pega o maior peso que o jogador tem
+                peso += int(cargos_vip[role.id])  # soma todos os pesos dos cargos VIP
         jogadores_com_peso.append((jogador, peso))
 
     # Ordenar por peso (VIPs mais prioritários primeiro)
