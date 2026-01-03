@@ -37,6 +37,10 @@ class Guild_Config(Base):
     ranqueada_channel_id = Column("ranqueada_channel_id", Integer, nullable=True)
     ranqueada_inscricao_channel_id = Column("ranqueada_inscricao_channel_id", Integer, nullable=True)
     ranqueada_confronto_channel_id = Column("ranqueada_confronto_channel_id", Integer, nullable=True)
+    # Cargos de permissão para puxar ranqueadas por formato
+    ranqueada_perm_1x1_role_id = Column("ranqueada_perm_1x1_role_id", Integer, nullable=True)
+    ranqueada_perm_2x2_role_id = Column("ranqueada_perm_2x2_role_id", Integer, nullable=True)
+    ranqueada_perm_3x3_role_id = Column("ranqueada_perm_3x3_role_id", Integer, nullable=True)
 
     def __init__(self, guild_id, guild_name, mrr_channel_id, matchmaking_channel_id, perm_cmd_role_id, match_close_count, confronto_channel_id, bdf_role_id=None, ranqueada_channel_id=None, ranqueada_inscricao_channel_id=None, ranqueada_confronto_channel_id=None):
         self.guild_id = guild_id

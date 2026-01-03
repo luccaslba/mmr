@@ -5,7 +5,7 @@ from db import session, Users, Guild_Config
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
 
 class StartRanqueadaView(View):
-    """View inicial com botões para escolher formato 1x1 ou 2x2"""
+    """View inicial com botões para escolher formato 1x1, 2x2 ou 3x3"""
     def __init__(self, bot):
         super().__init__(timeout=None)
         self.bot = bot
@@ -18,7 +18,61 @@ class StartRanqueadaView(View):
     async def btn_2x2(self, interaction: discord.Interaction, button: Button):
         await self.iniciar_ranqueada(interaction, "2x2")
 
+    @discord.ui.button(label="3x3", style=discord.ButtonStyle.blurple, emoji="👥", custom_id="ranqueada_3x3")
+    async def btn_3x3(self, interaction: discord.Interaction, button: Button):
+        await self.iniciar_ranqueada(interaction, "3x3")
+
     async def iniciar_ranqueada(self, interaction: discord.Interaction, formato: str):
+        # Verificar permissão para puxar ranqueada deste formato
+        config = session.query(Guild_Config).filter_by(guild_id=interaction.guild.id).first()
+        if config:
+            tem_permissao = False
+            cargo_necessario = None
+
+            # Verificar permissões hierárquicas (3x3 pode tudo, 2x2 pode 1x1 e 2x2, 1x1 só 1x1)
+            # Cargo 3x3 pode puxar qualquer formato
+            if config.ranqueada_perm_3x3_role_id:
+                role_3x3 = interaction.guild.get_role(config.ranqueada_perm_3x3_role_id)
+                if role_3x3 and role_3x3 in interaction.user.roles:
+                    tem_permissao = True
+
+            # Cargo 2x2 pode puxar 1x1 e 2x2
+            if not tem_permissao and formato in ["1x1", "2x2"] and config.ranqueada_perm_2x2_role_id:
+                role_2x2 = interaction.guild.get_role(config.ranqueada_perm_2x2_role_id)
+                if role_2x2 and role_2x2 in interaction.user.roles:
+                    tem_permissao = True
+
+            # Cargo 1x1 pode puxar apenas 1x1
+            if not tem_permissao and formato == "1x1" and config.ranqueada_perm_1x1_role_id:
+                role_1x1 = interaction.guild.get_role(config.ranqueada_perm_1x1_role_id)
+                if role_1x1 and role_1x1 in interaction.user.roles:
+                    tem_permissao = True
+
+            # Se não tem nenhum cargo configurado, permite todos (comportamento padrão)
+            if not config.ranqueada_perm_1x1_role_id and not config.ranqueada_perm_2x2_role_id and not config.ranqueada_perm_3x3_role_id:
+                tem_permissao = True
+
+            # OWNER sempre pode
+            if interaction.user.id == config_bot.OWNER_ID:
+                tem_permissao = True
+
+            if not tem_permissao:
+                # Determinar qual cargo é necessário
+                if formato == "1x1":
+                    cargo_id = config.ranqueada_perm_1x1_role_id or config.ranqueada_perm_2x2_role_id or config.ranqueada_perm_3x3_role_id
+                elif formato == "2x2":
+                    cargo_id = config.ranqueada_perm_2x2_role_id or config.ranqueada_perm_3x3_role_id
+                else:  # 3x3
+                    cargo_id = config.ranqueada_perm_3x3_role_id
+
+                cargo_mention = f"<@&{cargo_id}>" if cargo_id else "configurado"
+
+                return await interaction.response.send_message(
+                    f"❌ Você não tem permissão para puxar ranqueada **{formato}**!\n\n"
+                    f"Cargo necessário: {cargo_mention}",
+                    ephemeral=True
+                )
+
         # Verificar se usuário está registrado, se não, registrar automaticamente
         user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
         if not user_db:
@@ -123,15 +177,20 @@ class InscricaoRanqueadaView(View):
 
         # Configurações baseadas no formato
         # 1x1: max 8, min 4, sorteia 4
-        # 2x2: max 16, min 8, sorteia 8
+        # 2x2: max 16, min 8, sorteia 8 (4 duplas)
+        # 3x3: max 24, min 12, sorteia 12 (4 trios)
         if formato == "1x1":
             self.max_jogadores = 8
             self.min_jogadores = 4
             self.jogadores_sorteio = 4
-        else:  # 2x2
+        elif formato == "2x2":
             self.max_jogadores = 16
             self.min_jogadores = 8
             self.jogadores_sorteio = 8
+        else:  # 3x3
+            self.max_jogadores = 24
+            self.min_jogadores = 12
+            self.jogadores_sorteio = 12
 
     @discord.ui.button(label="Participar", style=discord.ButtonStyle.green, emoji="✅", custom_id="ranqueada_participar")
     async def btn_participar(self, interaction: discord.Interaction, button: Button):
@@ -239,12 +298,19 @@ class InscricaoRanqueadaView(View):
                 f"• Se não bater em 5min → Sorteia **{self.jogadores_sorteio} jogadores**\n"
                 f"• Mínimo **{self.min_jogadores} jogadores** para acontecer"
             )
-        else:  # 2x2
+        elif self.formato == "2x2":
             regras = (
                 f"• Se bater **{self.max_jogadores} inscritos** → Inicia imediatamente\n"
                 f"• Se não bater em 5min → Sorteia **{self.jogadores_sorteio} jogadores** (4 duplas)\n"
                 f"• Mínimo **{self.min_jogadores} jogadores** para acontecer\n"
                 f"• As duplas serão sorteadas automaticamente!"
+            )
+        else:  # 3x3
+            regras = (
+                f"• Se bater **{self.max_jogadores} inscritos** → Inicia imediatamente\n"
+                f"• Se não bater em 5min → Sorteia **{self.jogadores_sorteio} jogadores** (4 trios)\n"
+                f"• Mínimo **{self.min_jogadores} jogadores** para acontecer\n"
+                f"• Os trios serão sorteados automaticamente!"
             )
 
         embed = Embed(
@@ -318,7 +384,7 @@ class InscricaoRanqueadaView(View):
 
             titulo = f"🏆 Ranqueada Iniciada! ({len(jogadores_selecionados)} jogadores sorteados)"
 
-        # Para 2x2, sortear as duplas
+        # Formar times baseado no formato
         if self.formato == "2x2":
             # Embaralhar jogadores para formar duplas aleatórias
             jogadores_embaralhados = jogadores_selecionados.copy()
@@ -338,6 +404,29 @@ class InscricaoRanqueadaView(View):
 
             # Atualizar jogadores_selecionados com a ordem embaralhada
             jogadores_selecionados = jogadores_embaralhados
+
+        elif self.formato == "3x3":
+            # Embaralhar jogadores para formar trios aleatórios
+            jogadores_embaralhados = jogadores_selecionados.copy()
+            random.shuffle(jogadores_embaralhados)
+
+            # Criar texto com trios
+            jogadores_texto = "**Trios sorteados:**\n"
+            jogadores_ids = []
+            for i in range(0, len(jogadores_embaralhados), 3):
+                if i + 2 < len(jogadores_embaralhados):
+                    j1 = jogadores_embaralhados[i]
+                    j2 = jogadores_embaralhados[i + 1]
+                    j3 = jogadores_embaralhados[i + 2]
+                    trio_num = (i // 3) + 1
+                    jogadores_texto += f"**Trio {trio_num}:** {j1['user'].mention} + {j2['user'].mention} + {j3['user'].mention}\n"
+                    jogadores_ids.append(j1['user'].id)
+                    jogadores_ids.append(j2['user'].id)
+                    jogadores_ids.append(j3['user'].id)
+
+            # Atualizar jogadores_selecionados com a ordem embaralhada
+            jogadores_selecionados = jogadores_embaralhados
+
         else:
             # 1x1 - lista normal
             jogadores_texto = ""

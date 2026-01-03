@@ -165,6 +165,28 @@ async def migrate(ctx: commands.Context):
             else:
                 migracoes_desnecessarias.append("Tabela `ConstantesK` já existe")
 
+            # Migração 6: Adicionar colunas de permissão para ranqueadas por formato
+            if 'ranqueada_perm_1x1_role_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_perm_1x1_role_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `ranqueada_perm_1x1_role_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `ranqueada_perm_1x1_role_id` já existe")
+
+            if 'ranqueada_perm_2x2_role_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_perm_2x2_role_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `ranqueada_perm_2x2_role_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `ranqueada_perm_2x2_role_id` já existe")
+
+            if 'ranqueada_perm_3x3_role_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN ranqueada_perm_3x3_role_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `ranqueada_perm_3x3_role_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `ranqueada_perm_3x3_role_id` já existe")
+
             conn.close()
 
             # Criar embed de resultado
