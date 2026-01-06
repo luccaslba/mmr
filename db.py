@@ -41,6 +41,10 @@ class Guild_Config(Base):
     ranqueada_perm_1x1_role_id = Column("ranqueada_perm_1x1_role_id", Integer, nullable=True)
     ranqueada_perm_2x2_role_id = Column("ranqueada_perm_2x2_role_id", Integer, nullable=True)
     ranqueada_perm_3x3_role_id = Column("ranqueada_perm_3x3_role_id", Integer, nullable=True)
+    # Canais para estatísticas de organizadores e jurados
+    organizador_ranqueada_stats_channel_id = Column("organizador_ranqueada_stats_channel_id", Integer, nullable=True)
+    organizador_evento_stats_channel_id = Column("organizador_evento_stats_channel_id", Integer, nullable=True)
+    jurado_stats_channel_id = Column("jurado_stats_channel_id", Integer, nullable=True)
 
     def __init__(self, guild_id, guild_name, mrr_channel_id, matchmaking_channel_id, perm_cmd_role_id, match_close_count, confronto_channel_id, bdf_role_id=None, ranqueada_channel_id=None, ranqueada_inscricao_channel_id=None, ranqueada_confronto_channel_id=None):
         self.guild_id = guild_id
@@ -189,6 +193,40 @@ class RanqueadaContador(Base):
     def __init__(self, guild_id, contador=0):
         self.guild_id = guild_id
         self.contador = contador
+
+
+class OrganizadorContador(Base):
+    """Contador de partidas finalizadas por organizador"""
+    __tablename__ = "OrganizadorContador"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer)
+    user_id = Column(Integer)
+    contador_ranqueada = Column(Integer, default=0)
+    contador_evento = Column(Integer, default=0)
+
+    def __init__(self, guild_id, user_id, contador_ranqueada=0, contador_evento=0):
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.contador_ranqueada = contador_ranqueada
+        self.contador_evento = contador_evento
+
+
+class JuradoContador(Base):
+    """Contador de partidas que o jurado participou"""
+    __tablename__ = "JuradoContador"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer)
+    user_id = Column(Integer)
+    contador_ranqueada = Column(Integer, default=0)
+    contador_evento = Column(Integer, default=0)
+
+    def __init__(self, guild_id, user_id, contador_ranqueada=0, contador_evento=0):
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.contador_ranqueada = contador_ranqueada
+        self.contador_evento = contador_evento
 
 
 Base.metadata.create_all(bind=db)

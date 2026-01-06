@@ -187,6 +187,66 @@ async def migrate(ctx: commands.Context):
             else:
                 migracoes_desnecessarias.append("Coluna `ranqueada_perm_3x3_role_id` já existe")
 
+            # Migração 7: Adicionar colunas de canais de estatísticas
+            if 'organizador_ranqueada_stats_channel_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN organizador_ranqueada_stats_channel_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `organizador_ranqueada_stats_channel_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `organizador_ranqueada_stats_channel_id` já existe")
+
+            if 'organizador_evento_stats_channel_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN organizador_evento_stats_channel_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `organizador_evento_stats_channel_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `organizador_evento_stats_channel_id` já existe")
+
+            if 'jurado_stats_channel_id' not in columns:
+                cursor.execute("ALTER TABLE GuildConfig ADD COLUMN jurado_stats_channel_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `jurado_stats_channel_id` adicionada à GuildConfig")
+            else:
+                migracoes_desnecessarias.append("Coluna `jurado_stats_channel_id` já existe")
+
+            # Migração 8: Criar tabela OrganizadorContador
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='OrganizadorContador'")
+            tabela_org_existe = cursor.fetchone()
+
+            if not tabela_org_existe:
+                cursor.execute("""
+                    CREATE TABLE OrganizadorContador (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        contador_ranqueada INTEGER DEFAULT 0,
+                        contador_evento INTEGER DEFAULT 0
+                    )
+                """)
+                conn.commit()
+                migracoes_aplicadas.append("✅ Tabela `OrganizadorContador` criada com sucesso")
+            else:
+                migracoes_desnecessarias.append("Tabela `OrganizadorContador` já existe")
+
+            # Migração 9: Criar tabela JuradoContador
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='JuradoContador'")
+            tabela_jur_existe = cursor.fetchone()
+
+            if not tabela_jur_existe:
+                cursor.execute("""
+                    CREATE TABLE JuradoContador (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        contador_ranqueada INTEGER DEFAULT 0,
+                        contador_evento INTEGER DEFAULT 0
+                    )
+                """)
+                conn.commit()
+                migracoes_aplicadas.append("✅ Tabela `JuradoContador` criada com sucesso")
+            else:
+                migracoes_desnecessarias.append("Tabela `JuradoContador` já existe")
+
             conn.close()
 
             # Criar embed de resultado

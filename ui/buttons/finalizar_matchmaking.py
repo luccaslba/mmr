@@ -1,7 +1,8 @@
 import discord, emojis, functions, config_bot, random
 from discord import Embed
-from discord.ui import View, Button, Modal, TextInput, Select
-from db import session, Users, Guild_Config, MatchParticipantes, RanqueadaContador
+from discord.ui import View, Button, Modal, TextInput, Select, UserSelect
+from db import session, Users, Guild_Config, MatchParticipantes, RanqueadaContador, OrganizadorContador, JuradoContador
+from utils.stats_updater import incrementar_organizador, incrementar_jurado
 
 
 class JogadorSelect(Select):
@@ -220,6 +221,146 @@ class ConfirmarClassificacaoView(View):
 
     @discord.ui.button(label="Confirmar", style=discord.ButtonStyle.green, emoji="✅")
     async def confirmar(self, interaction: discord.Interaction, button: Button):
+        # Ao confirmar, ir para tela de adicionar jurado
+        embed = Embed(
+            title="⚖️ Adicionar Jurado",
+            description=(
+                "Deseja adicionar um **jurado** que participou desta partida?\n\n"
+                "• Clique em **Adicionar Jurado** para selecionar\n"
+                "• Clique em **Finalizar sem Jurado** para pular"
+            ),
+            color=discord.Color.purple()
+        )
+
+        view = AdicionarJuradoView(
+            self.bot, self.autor, self.participantes,
+            self.formato, self.tipo_evento, self.classificacao, self.parent_view
+        )
+
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Refazer", style=discord.ButtonStyle.gray, emoji="🔄")
+    async def refazer(self, interaction: discord.Interaction, button: Button):
+        # Reiniciar classificação
+        view = ClassificacaoPorPosicaoView(
+            self.bot, self.autor, self.participantes,
+            self.formato, self.tipo_evento, self.parent_view
+        )
+        embed = view.criar_embed_pergunta()
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.red, emoji="❌")
+    async def cancelar(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.edit_message(
+            content="❌ Classificação cancelada.",
+            embed=None,
+            view=None
+        )
+
+
+class JuradoUserSelect(UserSelect):
+    """Select para escolher jurado(s)"""
+    def __init__(self):
+        super().__init__(
+            placeholder="Selecione o(s) jurado(s)...",
+            min_values=1,
+            max_values=5  # Permite até 5 jurados
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: AdicionarJuradoView = self.view
+
+        # Adicionar jurados selecionados
+        for user in self.values:
+            if user.id not in view.jurados_selecionados:
+                view.jurados_selecionados.append(user.id)
+
+        # Atualizar embed
+        embed = view.criar_embed()
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class AdicionarJuradoView(View):
+    """View para adicionar jurados antes de finalizar"""
+    def __init__(self, bot, autor, participantes, formato, tipo_evento, classificacao, parent_view=None):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.autor = autor
+        self.participantes = participantes
+        self.formato = formato
+        self.tipo_evento = tipo_evento
+        self.classificacao = classificacao
+        self.parent_view = parent_view
+        self.jurados_selecionados = []  # Lista de user_ids
+
+        # Adicionar o UserSelect
+        self.add_item(JuradoUserSelect())
+
+    def criar_embed(self):
+        embed = Embed(
+            title="⚖️ Adicionar Jurado",
+            description=(
+                "Selecione o(s) jurado(s) que participou(aram) desta partida.\n\n"
+                "• Use o seletor abaixo para escolher\n"
+                "• Clique em **Confirmar Jurados** quando terminar\n"
+                "• Clique em **Finalizar sem Jurado** para pular"
+            ),
+            color=discord.Color.purple()
+        )
+
+        if self.jurados_selecionados:
+            jurados_texto = "\n".join([f"• <@{uid}>" for uid in self.jurados_selecionados])
+            embed.add_field(name="✅ Jurados Selecionados", value=jurados_texto, inline=False)
+
+        return embed
+
+    @discord.ui.button(label="Confirmar Jurados", style=discord.ButtonStyle.green, emoji="✅", row=1)
+    async def confirmar_jurados(self, interaction: discord.Interaction, button: Button):
+        if not self.jurados_selecionados:
+            return await interaction.response.send_message(
+                "❌ Selecione pelo menos um jurado ou clique em 'Finalizar sem Jurado'.",
+                ephemeral=True
+            )
+
+        await self.finalizar_partida(interaction, com_jurados=True)
+
+    @discord.ui.button(label="Finalizar sem Jurado", style=discord.ButtonStyle.gray, emoji="⏭️", row=1)
+    async def sem_jurado(self, interaction: discord.Interaction, button: Button):
+        await self.finalizar_partida(interaction, com_jurados=False)
+
+    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.red, emoji="◀️", row=1)
+    async def voltar(self, interaction: discord.Interaction, button: Button):
+        # Voltar para tela de confirmação
+        emojis_posicoes = {1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣",
+                          7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟"}
+
+        embed = Embed(
+            title="📋 Confirmar Classificação",
+            description="Verifique se a classificação está correta:",
+            color=discord.Color.green()
+        )
+
+        classificacao_texto = ""
+        for pos in sorted(self.classificacao.keys()):
+            pos_emoji = emojis_posicoes.get(pos, f"{pos}º")
+            nomes = []
+            for uid in self.classificacao[pos]:
+                p = next((x for x in self.participantes if x['user'].id == uid), None)
+                if p:
+                    nomes.append(f"{p['user'].name} ({p['mmr']} MMR)")
+            classificacao_texto += f"{pos_emoji} **{pos}º lugar:** {', '.join(nomes)}\n"
+
+        embed.add_field(name="🏆 Classificação Final", value=classificacao_texto, inline=False)
+
+        view = ConfirmarClassificacaoView(
+            self.bot, self.autor, self.participantes,
+            self.formato, self.tipo_evento, self.classificacao, self.parent_view
+        )
+
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def finalizar_partida(self, interaction: discord.Interaction, com_jurados: bool):
+        """Finaliza a partida processando pontuação, contadores e enviando resultado"""
         await interaction.response.defer(ephemeral=True)
 
         # Para times (2x2, 3x3), cada jogador do mesmo time deve ter A MESMA posição
@@ -260,9 +401,35 @@ class ConfirmarClassificacaoView(View):
             else:
                 titulo = f"🏆 Torneio Finalizado - {self.formato}"
 
+            # Incrementar contador do organizador
+            await incrementar_organizador(
+                interaction.guild.id,
+                self.autor.id,
+                self.tipo_evento,
+                interaction.guild
+            )
+
+            # Incrementar contador dos jurados (se houver)
+            if com_jurados and self.jurados_selecionados:
+                for jurado_id in self.jurados_selecionados:
+                    await incrementar_jurado(
+                        interaction.guild.id,
+                        jurado_id,
+                        self.tipo_evento,
+                        interaction.guild
+                    )
+
+            # Criar embed de resultado
+            descricao = f"**Organizador:** {self.autor.mention}\n**K usado:** {resultado.get('k_usado', 'N/A')}\n"
+
+            # Adicionar jurados no embed se houver
+            if com_jurados and self.jurados_selecionados:
+                jurados_mencoes = ", ".join([f"<@{uid}>" for uid in self.jurados_selecionados])
+                descricao += f"**Jurado(s):** {jurados_mencoes}\n"
+
             embed = Embed(
                 title=titulo,
-                description=f"**Organizador:** {self.autor.mention}\n**K usado:** {resultado.get('k_usado', 'N/A')}\n",
+                description=descricao,
                 color=discord.Color.gold()
             )
 
@@ -334,24 +501,6 @@ class ConfirmarClassificacaoView(View):
                 color=discord.Color.red()
             )
             await interaction.followup.send(embed=failed, ephemeral=True)
-
-    @discord.ui.button(label="Refazer", style=discord.ButtonStyle.gray, emoji="🔄")
-    async def refazer(self, interaction: discord.Interaction, button: Button):
-        # Reiniciar classificação
-        view = ClassificacaoPorPosicaoView(
-            self.bot, self.autor, self.participantes,
-            self.formato, self.tipo_evento, self.parent_view
-        )
-        embed = view.criar_embed_pergunta()
-        await interaction.response.edit_message(embed=embed, view=view)
-
-    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.red, emoji="❌")
-    async def cancelar(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.edit_message(
-            content="❌ Classificação cancelada.",
-            embed=None,
-            view=None
-        )
 
 
 class RemoverJogadorSelect(Select):
