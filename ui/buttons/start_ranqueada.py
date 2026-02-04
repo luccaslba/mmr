@@ -229,7 +229,8 @@ class InscricaoRanqueadaView(View):
                 'user_id': participante.user_id,
                 'user_name': participante.user_name,
                 'mmr': user_db.MRR if user_db else 0,
-                'garantido': eh_organizador
+                'garantido': eh_organizador,
+                'equipe_id': participante.equipe_id
             })
 
         return inscritos
@@ -278,14 +279,74 @@ class InscricaoRanqueadaView(View):
         # Buscar inscritos da tabela
         inscritos = self.buscar_inscritos()
 
+        # Determinar tamanho do time
+        tamanho_time = int(self.formato.split("x")[0]) if "x" in self.formato else 1
+
         inscritos_texto = ""
         if inscritos:
-            for i, inscrito in enumerate(inscritos, 1):
-                garantido = " ⭐" if inscrito.get('garantido') else ""
-                if inscrito['user']:
-                    inscritos_texto += f"`{i}.` {inscrito['user'].mention} (MMR: {inscrito['mmr']}){garantido}\n"
-                else:
-                    inscritos_texto += f"`{i}.` {inscrito['user_name']} (MMR: {inscrito['mmr']}){garantido}\n"
+            if tamanho_time > 1:
+                # Para 2x2 ou 3x3: agrupar por equipe
+                equipes = {}
+                solos = []
+
+                for inscrito in inscritos:
+                    equipe_id = inscrito.get('equipe_id')
+                    if equipe_id:
+                        if equipe_id not in equipes:
+                            equipes[equipe_id] = []
+                        equipes[equipe_id].append(inscrito)
+                    else:
+                        solos.append(inscrito)
+
+                contador = 1
+                # Mostrar equipes formadas
+                for equipe_id, membros in equipes.items():
+                    if len(membros) >= tamanho_time:
+                        # Equipe completa
+                        nomes = []
+                        mmr_total = 0
+                        tem_garantido = False
+                        for m in membros:
+                            nome = m['user'].mention if m['user'] else m['user_name']
+                            nomes.append(nome)
+                            mmr_total += m['mmr']
+                            if m.get('garantido'):
+                                tem_garantido = True
+                        garantido = " ⭐" if tem_garantido else ""
+                        inscritos_texto += f"`{contador}.` 👥 {' + '.join(nomes)} (MMR: {mmr_total}){garantido}\n"
+                        contador += 1
+                    else:
+                        # Equipe incompleta - mostrar com indicador
+                        nomes = []
+                        mmr_total = 0
+                        tem_garantido = False
+                        for m in membros:
+                            nome = m['user'].mention if m['user'] else m['user_name']
+                            nomes.append(nome)
+                            mmr_total += m['mmr']
+                            if m.get('garantido'):
+                                tem_garantido = True
+                        garantido = " ⭐" if tem_garantido else ""
+                        faltam = tamanho_time - len(membros)
+                        inscritos_texto += f"`{contador}.` 👥 {' + '.join(nomes)} ⚠️ *falta {faltam}* (MMR: {mmr_total}){garantido}\n"
+                        contador += 1
+
+                # Mostrar jogadores solo
+                for inscrito in solos:
+                    garantido = " ⭐" if inscrito.get('garantido') else ""
+                    if inscrito['user']:
+                        inscritos_texto += f"`{contador}.` {inscrito['user'].mention} (MMR: {inscrito['mmr']}){garantido}\n"
+                    else:
+                        inscritos_texto += f"`{contador}.` {inscrito['user_name']} (MMR: {inscrito['mmr']}){garantido}\n"
+                    contador += 1
+            else:
+                # 1x1: lista normal
+                for i, inscrito in enumerate(inscritos, 1):
+                    garantido = " ⭐" if inscrito.get('garantido') else ""
+                    if inscrito['user']:
+                        inscritos_texto += f"`{i}.` {inscrito['user'].mention} (MMR: {inscrito['mmr']}){garantido}\n"
+                    else:
+                        inscritos_texto += f"`{i}.` {inscrito['user_name']} (MMR: {inscrito['mmr']}){garantido}\n"
         else:
             inscritos_texto = "*Nenhum inscrito ainda*"
 
@@ -296,20 +357,23 @@ class InscricaoRanqueadaView(View):
                 f"• Se não bater em 5min → Sorteia **{self.jogadores_sorteio} jogadores**\n"
                 f"• Mínimo **{self.min_jogadores} jogadores** para acontecer"
             )
+            instrucao = "**Digite `.` no chat para participar!**"
         elif self.formato == "2x2":
             regras = (
                 f"• Se bater **{self.max_jogadores} inscritos** → Inicia imediatamente\n"
                 f"• Se não bater em 5min → Sorteia **{self.jogadores_sorteio} jogadores** (4 duplas)\n"
                 f"• Mínimo **{self.min_jogadores} jogadores** para acontecer\n"
-                f"• As duplas serão sorteadas automaticamente!"
+                f"• Jogadores solo serão agrupados automaticamente!"
             )
+            instrucao = "**Digite `.` para participar solo ou `. @parceiro` para formar dupla!**"
         else:  # 3x3
             regras = (
                 f"• Se bater **{self.max_jogadores} inscritos** → Inicia imediatamente\n"
                 f"• Se não bater em 5min → Sorteia **{self.jogadores_sorteio} jogadores** (4 trios)\n"
                 f"• Mínimo **{self.min_jogadores} jogadores** para acontecer\n"
-                f"• Os trios serão sorteados automaticamente!"
+                f"• Jogadores solo serão agrupados automaticamente!"
             )
+            instrucao = "**Digite `.` para participar solo ou `. @pessoa1 @pessoa2` para formar trio!**"
 
         embed = Embed(
             title=f"🏆 Ranqueada {self.formato}",
@@ -318,7 +382,7 @@ class InscricaoRanqueadaView(View):
                 f"**Formato:** `{self.formato}`\n"
                 f"**Tempo restante:** `{minutos:02d}:{segundos:02d}`\n\n"
                 f"**Regras:**\n{regras}\n\n"
-                f"**Digite `.` no chat para participar!**"
+                f"{instrucao}"
             ),
             color=discord.Color.gold()
         )
@@ -329,7 +393,7 @@ class InscricaoRanqueadaView(View):
             inline=False
         )
 
-        embed.set_footer(text="⭐ = Vaga garantida (organizador)")
+        embed.set_footer(text="⭐ = Vaga garantida (organizador) | 👥 = Equipe formada")
         return embed
 
     async def iniciar_timer(self, message, channel):

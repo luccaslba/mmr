@@ -75,9 +75,13 @@ class DataHorarioModal(Modal, title="Data e Horário do Evento"):
             total_pessoas = self.vagas * jogadores_por_time
             texto_vagas = f"**Vagas:** `{self.vagas} equipes` ({total_pessoas} pessoas)"
 
-        # Texto diferente para BDF
+        # Texto diferente para BDF e por formato
         if self.tipo_evento == "bdf":
             instrucao = f"⚔️ **Evento BDF - Vagas Garantidas**\nO organizador irá adicionar os participantes manualmente."
+        elif self.formato == "2x2":
+            instrucao = "Digite **`.`** para participar solo ou **`. @parceiro`** para formar dupla!"
+        elif self.formato == "3x3":
+            instrucao = "Digite **`.`** para participar solo ou **`. @pessoa1 @pessoa2`** para formar trio!"
         else:
             instrucao = "Digite **`.`** no chat para participar!"
 
@@ -677,8 +681,12 @@ class TransferirOrganizadorSelect(UserSelect):
 
                 if self.parent_view.evento_view.tipo_evento == "bdf":
                     instrucao = f"⚔️ **Evento BDF - Vagas Garantidas**\nO organizador irá adicionar os participantes manualmente."
+                elif formato == "2x2":
+                    instrucao = "Digite **`.`** para participar solo ou **`. @parceiro`** para formar dupla!"
+                elif formato == "3x3":
+                    instrucao = "Digite **`.`** para participar solo ou **`. @pessoa1 @pessoa2`** para formar trio!"
                 else:
-                    instrucao = "Reaja com ✅ para participar!"
+                    instrucao = "Digite **`.`** no chat para participar!"
 
                 embed = Embed(
                     title=f"🏆 Torneio {formato} - {tipo_nome}",

@@ -41,6 +41,16 @@ def run_auto_migrations():
             conn.commit()
             print("✅ Migração: coluna ranqueada_confronto_channel_id adicionada")
 
+        # Migração: equipe_id em InscricaoEventoParticipante
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='InscricaoEventoParticipante'")
+        if cursor.fetchone():
+            cursor.execute("PRAGMA table_info(InscricaoEventoParticipante)")
+            columns_participante = [column[1] for column in cursor.fetchall()]
+            if 'equipe_id' not in columns_participante:
+                cursor.execute("ALTER TABLE InscricaoEventoParticipante ADD COLUMN equipe_id INTEGER")
+                conn.commit()
+                print("✅ Migração: coluna equipe_id adicionada à InscricaoEventoParticipante")
+
         conn.close()
         print("✅ Migrações verificadas com sucesso")
     except Exception as e:
@@ -68,8 +78,9 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Verificar se é "." para inscrição em evento
-    if message.content.strip() == ".":
+    # Verificar se começa com "." para inscrição em evento/ranqueada
+    conteudo = message.content.strip()
+    if conteudo.startswith("."):
         # Verificar se há inscrição aberta neste canal
         inscricao = session.query(InscricaoEvento).filter_by(
             channel_id=message.channel.id,
@@ -77,16 +88,87 @@ async def on_message(message):
         ).first()
 
         if inscricao:
-            # Verificar se usuário já está inscrito
-            ja_inscrito = session.query(InscricaoEventoParticipante).filter_by(
+            # Pegar menções da mensagem (excluindo bots)
+            mencoes = [m for m in message.mentions if not m.bot and m.id != message.author.id]
+
+            # Determinar tamanho máximo do time baseado no formato
+            formato = inscricao.formato
+            if formato and "x" in formato:
+                tamanho_time = int(formato.split("x")[0])
+            else:
+                tamanho_time = 1
+
+            # Validar quantidade de menções
+            max_mencoes = tamanho_time - 1  # 1x1=0, 2x2=1, 3x3=2
+            if len(mencoes) > max_mencoes:
+                # Muitas menções - ignorar silenciosamente
+                return await bot.process_commands(message)
+
+            # Verificar se autor já está inscrito
+            autor_inscrito = session.query(InscricaoEventoParticipante).filter_by(
                 inscricao_id=inscricao.id,
                 user_id=message.author.id
             ).first()
 
-            if ja_inscrito:
-                # Usuário já está inscrito - não faz nada
-                pass
+            if autor_inscrito:
+                # Se autor já está inscrito mas mandou menções, pode estar formando time
+                if mencoes and tamanho_time > 1:
+                    # Verificar se autor já tem equipe completa
+                    if autor_inscrito.equipe_id:
+                        membros_equipe = session.query(InscricaoEventoParticipante).filter_by(
+                            inscricao_id=inscricao.id,
+                            equipe_id=autor_inscrito.equipe_id
+                        ).count()
+                        if membros_equipe >= tamanho_time:
+                            # Equipe já completa
+                            return await bot.process_commands(message)
+
+                    # Definir equipe_id como o ID do autor (líder)
+                    equipe_id = message.author.id
+                    autor_inscrito.equipe_id = equipe_id
+                    session.commit()
+
+                    # Processar menções para adicionar à equipe
+                    for mencionado in mencoes:
+                        # Verificar se mencionado já está inscrito
+                        mencionado_inscrito = session.query(InscricaoEventoParticipante).filter_by(
+                            inscricao_id=inscricao.id,
+                            user_id=mencionado.id
+                        ).first()
+
+                        if mencionado_inscrito:
+                            # Se já está em outra equipe, não pode
+                            if mencionado_inscrito.equipe_id and mencionado_inscrito.equipe_id != equipe_id:
+                                continue
+                            # Adicionar à equipe do autor
+                            mencionado_inscrito.equipe_id = equipe_id
+                            session.commit()
+                        else:
+                            # Registrar mencionado no bot se necessário
+                            user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
+                            if not user_db:
+                                add_user = Users(mencionado.id, mencionado.name, 0, message.guild.id)
+                                session.add(add_user)
+                                session.commit()
+
+                            # Verificar restrição de MMR para eventos fechados
+                            if inscricao.tipo_evento in ["f", "fechado"]:
+                                user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
+                                guild_config = session.query(db.Guild_Config).filter_by(guild_id=message.guild.id).first()
+                                if guild_config and user_db.MRR < guild_config.match_close_count:
+                                    continue  # MMR insuficiente - não adiciona
+
+                            # Inscrever mencionado na equipe
+                            participante = InscricaoEventoParticipante(
+                                inscricao_id=inscricao.id,
+                                user_id=mencionado.id,
+                                user_name=mencionado.name,
+                                equipe_id=equipe_id
+                            )
+                            session.add(participante)
+                            session.commit()
             else:
+                # Autor não está inscrito - registrar
                 # Verificar se usuário está registrado no bot, se não, registrar
                 user_db = session.query(Users).filter_by(discord_id=message.author.id).first()
                 if not user_db:
@@ -102,14 +184,58 @@ async def on_message(message):
                         # MMR insuficiente - não inscreve
                         return await bot.process_commands(message)
 
-                # Inscrever usuário
+                # Definir equipe_id se tiver menções
+                equipe_id = message.author.id if mencoes else None
+
+                # Inscrever autor
                 participante = InscricaoEventoParticipante(
                     inscricao_id=inscricao.id,
                     user_id=message.author.id,
-                    user_name=message.author.name
+                    user_name=message.author.name,
+                    equipe_id=equipe_id
                 )
                 session.add(participante)
                 session.commit()
+
+                # Processar menções para adicionar à equipe
+                for mencionado in mencoes:
+                    # Verificar se mencionado já está inscrito
+                    mencionado_inscrito = session.query(InscricaoEventoParticipante).filter_by(
+                        inscricao_id=inscricao.id,
+                        user_id=mencionado.id
+                    ).first()
+
+                    if mencionado_inscrito:
+                        # Se já está em outra equipe, não pode
+                        if mencionado_inscrito.equipe_id and mencionado_inscrito.equipe_id != equipe_id:
+                            continue
+                        # Adicionar à equipe do autor
+                        mencionado_inscrito.equipe_id = equipe_id
+                        session.commit()
+                    else:
+                        # Registrar mencionado no bot se necessário
+                        user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
+                        if not user_db:
+                            add_user = Users(mencionado.id, mencionado.name, 0, message.guild.id)
+                            session.add(add_user)
+                            session.commit()
+
+                        # Verificar restrição de MMR para eventos fechados
+                        if inscricao.tipo_evento in ["f", "fechado"]:
+                            user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
+                            guild_config = session.query(db.Guild_Config).filter_by(guild_id=message.guild.id).first()
+                            if guild_config and user_db.MRR < guild_config.match_close_count:
+                                continue  # MMR insuficiente - não adiciona
+
+                        # Inscrever mencionado na equipe
+                        participante = InscricaoEventoParticipante(
+                            inscricao_id=inscricao.id,
+                            user_id=mencionado.id,
+                            user_name=mencionado.name,
+                            equipe_id=equipe_id
+                        )
+                        session.add(participante)
+                        session.commit()
 
     # Processar comandos normalmente
     await bot.process_commands(message)
@@ -334,13 +460,25 @@ async def migrate(ctx: commands.Context):
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         inscricao_id INTEGER NOT NULL,
                         user_id INTEGER NOT NULL,
-                        user_name TEXT
+                        user_name TEXT,
+                        equipe_id INTEGER
                     )
                 """)
                 conn.commit()
                 migracoes_aplicadas.append("✅ Tabela `InscricaoEventoParticipante` criada com sucesso")
             else:
                 migracoes_desnecessarias.append("Tabela `InscricaoEventoParticipante` já existe")
+
+            # Migração 12: Adicionar coluna equipe_id em InscricaoEventoParticipante
+            cursor.execute("PRAGMA table_info(InscricaoEventoParticipante)")
+            columns_participante = [column[1] for column in cursor.fetchall()]
+
+            if 'equipe_id' not in columns_participante:
+                cursor.execute("ALTER TABLE InscricaoEventoParticipante ADD COLUMN equipe_id INTEGER")
+                conn.commit()
+                migracoes_aplicadas.append("✅ Coluna `equipe_id` adicionada à InscricaoEventoParticipante")
+            else:
+                migracoes_desnecessarias.append("Coluna `equipe_id` já existe em InscricaoEventoParticipante")
 
             conn.close()
 

@@ -264,11 +264,13 @@ class InscricaoEventoParticipante(Base):
     inscricao_id = Column(Integer)  # ID da InscricaoEvento
     user_id = Column(Integer)
     user_name = Column(String)
+    equipe_id = Column(Integer, nullable=True)  # ID do líder da equipe (NULL = solo)
 
-    def __init__(self, inscricao_id, user_id, user_name):
+    def __init__(self, inscricao_id, user_id, user_name, equipe_id=None):
         self.inscricao_id = inscricao_id
         self.user_id = user_id
         self.user_name = user_name
+        self.equipe_id = equipe_id
 
 
 Base.metadata.create_all(bind=db)
