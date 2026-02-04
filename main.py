@@ -81,11 +81,16 @@ async def on_message(message):
     # Verificar se começa com "." para inscrição em evento/ranqueada
     conteudo = message.content.strip()
     if conteudo.startswith("."):
+        # Refresh da sessão para pegar dados atualizados
+        session.expire_all()
+
         # Verificar se há inscrição aberta neste canal
         inscricao = session.query(InscricaoEvento).filter_by(
             channel_id=message.channel.id,
             ativo=True
         ).first()
+
+        print(f"[DEBUG] Mensagem '.' detectada no canal {message.channel.id}, inscricao encontrada: {inscricao is not None}")
 
         if inscricao:
             # Pegar menções da mensagem (excluindo bots)
