@@ -176,6 +176,86 @@ class ConfirmarParticipacaoView(View):
         asyncio.create_task(view.iniciar_timer(message, channel))
 
 
+class ParticiparRanqueadaButton(discord.ui.Button):
+    """Botão para participar da ranqueada"""
+    def __init__(self, parent_view):
+        super().__init__(
+            label="Participar",
+            style=discord.ButtonStyle.green,
+            emoji="✅",
+            custom_id="ranqueada_participar"
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.parent_view.finalizado:
+            return await interaction.response.send_message("Esta ranqueada já foi finalizada!", ephemeral=True)
+
+        # Verificar se já está inscrito
+        ja_inscrito = session.query(InscricaoEventoParticipante).filter_by(
+            inscricao_id=self.parent_view.inscricao_id,
+            user_id=interaction.user.id
+        ).first()
+
+        if ja_inscrito:
+            return await interaction.response.send_message("Você já está inscrito nesta ranqueada!", ephemeral=True)
+
+        # Verificar se usuário está registrado no bot
+        user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
+        if not user_db:
+            add_user = Users(interaction.user.id, interaction.user.name, 0, interaction.guild.id)
+            session.add(add_user)
+            session.commit()
+
+        # Inscrever
+        participante = InscricaoEventoParticipante(
+            inscricao_id=self.parent_view.inscricao_id,
+            user_id=interaction.user.id,
+            user_name=interaction.user.name
+        )
+        session.add(participante)
+        session.commit()
+
+        await interaction.response.send_message("✅ Você foi inscrito na ranqueada!", ephemeral=True)
+        await self.parent_view.atualizar_embed()
+
+
+class SairRanqueadaButton(discord.ui.Button):
+    """Botão para sair da ranqueada"""
+    def __init__(self, parent_view):
+        super().__init__(
+            label="Sair",
+            style=discord.ButtonStyle.red,
+            emoji="❌",
+            custom_id="ranqueada_sair"
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.parent_view.finalizado:
+            return await interaction.response.send_message("Esta ranqueada já foi finalizada!", ephemeral=True)
+
+        # Verificar se está inscrito
+        inscrito = session.query(InscricaoEventoParticipante).filter_by(
+            inscricao_id=self.parent_view.inscricao_id,
+            user_id=interaction.user.id
+        ).first()
+
+        if not inscrito:
+            return await interaction.response.send_message("Você não está inscrito nesta ranqueada!", ephemeral=True)
+
+        # Verificar se é o organizador com vaga garantida
+        if interaction.user.id == self.parent_view.organizador.id and self.parent_view.organizador_participando:
+            return await interaction.response.send_message("O organizador não pode sair da ranqueada. Use 'Cancelar Ranqueada' se precisar.", ephemeral=True)
+
+        # Remover inscrição
+        session.delete(inscrito)
+        session.commit()
+
+        await interaction.response.send_message("❌ Você saiu da ranqueada!", ephemeral=True)
+        await self.parent_view.atualizar_embed()
+
+
 class InscricaoRanqueadaView(View):
     """View para inscrição na ranqueada com timer (usando mensagem '.')"""
     def __init__(self, bot, organizador, formato, organizador_participando, confronto_channel=None, guild_id=None):
@@ -207,6 +287,10 @@ class InscricaoRanqueadaView(View):
             self.max_jogadores = 24
             self.min_jogadores = 12
             self.jogadores_sorteio = 12
+
+        # Adicionar botões
+        self.add_item(ParticiparRanqueadaButton(self))
+        self.add_item(SairRanqueadaButton(self))
 
     def buscar_inscritos(self):
         """Busca os inscritos da tabela e retorna lista formatada"""

@@ -91,52 +91,114 @@ async def on_message(message):
                 ativo=True
             ).first()
 
-            print(f"[DEBUG] Mensagem '.' detectada no canal {message.channel.id}, inscricao encontrada: {inscricao is not None}")
+            if inscricao:
 
-        if inscricao:
-            print(f"[DEBUG] Inscricao ID: {inscricao.id}, formato: {inscricao.formato}, ativo: {inscricao.ativo}")
+                # Pegar menções da mensagem (excluindo bots)
+                mencoes = [m for m in message.mentions if not m.bot and m.id != message.author.id]
 
-            # Pegar menções da mensagem (excluindo bots)
-            mencoes = [m for m in message.mentions if not m.bot and m.id != message.author.id]
+                # Determinar tamanho máximo do time baseado no formato
+                formato = inscricao.formato
+                if formato and "x" in formato:
+                    tamanho_time = int(formato.split("x")[0])
+                else:
+                    tamanho_time = 1
 
-            # Determinar tamanho máximo do time baseado no formato
-            formato = inscricao.formato
-            if formato and "x" in formato:
-                tamanho_time = int(formato.split("x")[0])
-            else:
-                tamanho_time = 1
+                # Validar quantidade de menções
+                max_mencoes = tamanho_time - 1  # 1x1=0, 2x2=1, 3x3=2
+                if len(mencoes) > max_mencoes:
+                    return await bot.process_commands(message)
 
-            # Validar quantidade de menções
-            max_mencoes = tamanho_time - 1  # 1x1=0, 2x2=1, 3x3=2
-            if len(mencoes) > max_mencoes:
-                # Muitas menções - ignorar silenciosamente
-                print(f"[DEBUG] Muitas menções ({len(mencoes)} > {max_mencoes}), ignorando")
-                return await bot.process_commands(message)
+                # Verificar se autor já está inscrito
+                autor_inscrito = session.query(InscricaoEventoParticipante).filter_by(
+                    inscricao_id=inscricao.id,
+                    user_id=message.author.id
+                ).first()
 
-            # Verificar se autor já está inscrito
-            autor_inscrito = session.query(InscricaoEventoParticipante).filter_by(
-                inscricao_id=inscricao.id,
-                user_id=message.author.id
-            ).first()
+                if autor_inscrito:
+                    # Se autor já está inscrito mas mandou menções, pode estar formando time
+                    if mencoes and tamanho_time > 1:
+                        # Verificar se autor já tem equipe completa
+                        if autor_inscrito.equipe_id:
+                            membros_equipe = session.query(InscricaoEventoParticipante).filter_by(
+                                inscricao_id=inscricao.id,
+                                equipe_id=autor_inscrito.equipe_id
+                            ).count()
+                            if membros_equipe >= tamanho_time:
+                                # Equipe já completa
+                                return await bot.process_commands(message)
 
-            print(f"[DEBUG] Autor {message.author.name} já inscrito: {autor_inscrito is not None}")
+                        # Definir equipe_id como o ID do autor (líder)
+                        equipe_id = message.author.id
+                        autor_inscrito.equipe_id = equipe_id
+                        session.commit()
 
-            if autor_inscrito:
-                # Se autor já está inscrito mas mandou menções, pode estar formando time
-                if mencoes and tamanho_time > 1:
-                    # Verificar se autor já tem equipe completa
-                    if autor_inscrito.equipe_id:
-                        membros_equipe = session.query(InscricaoEventoParticipante).filter_by(
-                            inscricao_id=inscricao.id,
-                            equipe_id=autor_inscrito.equipe_id
-                        ).count()
-                        if membros_equipe >= tamanho_time:
-                            # Equipe já completa
+                        # Processar menções para adicionar à equipe
+                        for mencionado in mencoes:
+                            # Verificar se mencionado já está inscrito
+                            mencionado_inscrito = session.query(InscricaoEventoParticipante).filter_by(
+                                inscricao_id=inscricao.id,
+                                user_id=mencionado.id
+                            ).first()
+
+                            if mencionado_inscrito:
+                                # Se já está em outra equipe, não pode
+                                if mencionado_inscrito.equipe_id and mencionado_inscrito.equipe_id != equipe_id:
+                                    continue
+                                # Adicionar à equipe do autor
+                                mencionado_inscrito.equipe_id = equipe_id
+                                session.commit()
+                            else:
+                                # Registrar mencionado no bot se necessário
+                                user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
+                                if not user_db:
+                                    add_user = Users(mencionado.id, mencionado.name, 0, message.guild.id)
+                                    session.add(add_user)
+                                    session.commit()
+
+                                # Verificar restrição de MMR para eventos fechados
+                                if inscricao.tipo_evento in ["f", "fechado"]:
+                                    user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
+                                    guild_config = session.query(Guild_Config).filter_by(guild_id=message.guild.id).first()
+                                    if guild_config and user_db.MRR < guild_config.match_close_count:
+                                        continue  # MMR insuficiente - não adiciona
+
+                                # Inscrever mencionado na equipe
+                                participante = InscricaoEventoParticipante(
+                                    inscricao_id=inscricao.id,
+                                    user_id=mencionado.id,
+                                    user_name=mencionado.name,
+                                    equipe_id=equipe_id
+                                )
+                                session.add(participante)
+                                session.commit()
+                else:
+                    # Autor não está inscrito - registrar
+                    # Verificar se usuário está registrado no bot, se não, registrar
+                    user_db = session.query(Users).filter_by(discord_id=message.author.id).first()
+                    if not user_db:
+                        add_user = Users(message.author.id, message.author.name, 0, message.guild.id)
+                        session.add(add_user)
+                        session.commit()
+
+                    # Verificar restrição de MMR para eventos fechados
+                    if inscricao.tipo_evento in ["f", "fechado"]:
+                        user_db = session.query(Users).filter_by(discord_id=message.author.id).first()
+                        guild_config = session.query(Guild_Config).filter_by(guild_id=message.guild.id).first()
+                        if guild_config and user_db.MRR < guild_config.match_close_count:
+                            # MMR insuficiente - não inscreve
                             return await bot.process_commands(message)
 
-                    # Definir equipe_id como o ID do autor (líder)
-                    equipe_id = message.author.id
-                    autor_inscrito.equipe_id = equipe_id
+                    # Definir equipe_id se tiver menções
+                    equipe_id = message.author.id if mencoes else None
+
+                    # Inscrever autor
+                    participante = InscricaoEventoParticipante(
+                        inscricao_id=inscricao.id,
+                        user_id=message.author.id,
+                        user_name=message.author.name,
+                        equipe_id=equipe_id
+                    )
+                    session.add(participante)
                     session.commit()
 
                     # Processar menções para adicionar à equipe
@@ -165,7 +227,7 @@ async def on_message(message):
                             # Verificar restrição de MMR para eventos fechados
                             if inscricao.tipo_evento in ["f", "fechado"]:
                                 user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
-                                guild_config = session.query(db.Guild_Config).filter_by(guild_id=message.guild.id).first()
+                                guild_config = session.query(Guild_Config).filter_by(guild_id=message.guild.id).first()
                                 if guild_config and user_db.MRR < guild_config.match_close_count:
                                     continue  # MMR insuficiente - não adiciona
 
@@ -178,80 +240,8 @@ async def on_message(message):
                             )
                             session.add(participante)
                             session.commit()
-            else:
-                # Autor não está inscrito - registrar
-                # Verificar se usuário está registrado no bot, se não, registrar
-                user_db = session.query(Users).filter_by(discord_id=message.author.id).first()
-                if not user_db:
-                    add_user = Users(message.author.id, message.author.name, 0, message.guild.id)
-                    session.add(add_user)
-                    session.commit()
-
-                # Verificar restrição de MMR para eventos fechados
-                if inscricao.tipo_evento in ["f", "fechado"]:
-                    user_db = session.query(Users).filter_by(discord_id=message.author.id).first()
-                    guild_config = session.query(db.Guild_Config).filter_by(guild_id=message.guild.id).first()
-                    if guild_config and user_db.MRR < guild_config.match_close_count:
-                        # MMR insuficiente - não inscreve
-                        return await bot.process_commands(message)
-
-                # Definir equipe_id se tiver menções
-                equipe_id = message.author.id if mencoes else None
-
-                # Inscrever autor
-                participante = InscricaoEventoParticipante(
-                    inscricao_id=inscricao.id,
-                    user_id=message.author.id,
-                    user_name=message.author.name,
-                    equipe_id=equipe_id
-                )
-                session.add(participante)
-                session.commit()
-                print(f"[DEBUG] ✅ {message.author.name} inscrito com sucesso! ID: {participante.id}")
-
-                # Processar menções para adicionar à equipe
-                for mencionado in mencoes:
-                    # Verificar se mencionado já está inscrito
-                    mencionado_inscrito = session.query(InscricaoEventoParticipante).filter_by(
-                        inscricao_id=inscricao.id,
-                        user_id=mencionado.id
-                    ).first()
-
-                    if mencionado_inscrito:
-                        # Se já está em outra equipe, não pode
-                        if mencionado_inscrito.equipe_id and mencionado_inscrito.equipe_id != equipe_id:
-                            continue
-                        # Adicionar à equipe do autor
-                        mencionado_inscrito.equipe_id = equipe_id
-                        session.commit()
-                    else:
-                        # Registrar mencionado no bot se necessário
-                        user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
-                        if not user_db:
-                            add_user = Users(mencionado.id, mencionado.name, 0, message.guild.id)
-                            session.add(add_user)
-                            session.commit()
-
-                        # Verificar restrição de MMR para eventos fechados
-                        if inscricao.tipo_evento in ["f", "fechado"]:
-                            user_db = session.query(Users).filter_by(discord_id=mencionado.id).first()
-                            guild_config = session.query(db.Guild_Config).filter_by(guild_id=message.guild.id).first()
-                            if guild_config and user_db.MRR < guild_config.match_close_count:
-                                continue  # MMR insuficiente - não adiciona
-
-                        # Inscrever mencionado na equipe
-                        participante = InscricaoEventoParticipante(
-                            inscricao_id=inscricao.id,
-                            user_id=mencionado.id,
-                            user_name=mencionado.name,
-                            equipe_id=equipe_id
-                        )
-                        session.add(participante)
-                        session.commit()
         except Exception as e:
-            print(f"[DEBUG] ❌ ERRO na inscrição: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Erro na inscrição via mensagem: {e}")
 
     # Processar comandos normalmente
     await bot.process_commands(message)
