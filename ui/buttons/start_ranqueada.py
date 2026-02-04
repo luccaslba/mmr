@@ -1,7 +1,7 @@
 import discord, emojis, asyncio, random, config_bot
 from discord import Embed
 from discord.ui import View, Button, Select
-from db import session, Users, Guild_Config
+from db import session, Users, Guild_Config, InscricaoEvento, InscricaoEventoParticipante
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
 
 class StartRanqueadaView(View):
@@ -121,29 +121,17 @@ class ConfirmarParticipacaoView(View):
         if not channel:
             return await interaction.response.send_message("Canal de inscrições da ranqueada não encontrado.", ephemeral=True)
 
-        # Criar lista de inscritos
-        inscritos = []
-        organizador_participando = participando
-
-        if participando:
-            user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
-            inscritos.append({
-                'user': interaction.user,
-                'mmr': user_db.MRR if user_db else 0,
-                'garantido': True  # Organizador é garantido
-            })
-
         # Obter canal de confronto
         confronto_channel = interaction.guild.get_channel(config.ranqueada_confronto_channel_id) if config.ranqueada_confronto_channel_id else None
 
-        # Criar view de inscrição
+        # Criar view de inscrição (agora sem botões de participar/sair)
         view = InscricaoRanqueadaView(
             self.bot,
             self.organizador,
             self.formato,
-            inscritos,
-            organizador_participando,
-            confronto_channel
+            participando,
+            confronto_channel,
+            interaction.guild.id
         )
 
         # Criar embed da ranqueada
@@ -157,23 +145,51 @@ class ConfirmarParticipacaoView(View):
         message = await channel.send(embed=embed, view=view)
         view.message = message
 
+        # Criar registro de inscrição aberta
+        inscricao = InscricaoEvento(
+            guild_id=interaction.guild.id,
+            channel_id=channel.id,
+            message_id=message.id,
+            autor_id=interaction.user.id,
+            formato=self.formato,
+            vagas=view.max_jogadores,
+            tipo_evento="ranqueada",
+            modo_sorteio="unico"
+        )
+        session.add(inscricao)
+        session.commit()
+
+        view.inscricao_id = inscricao.id
+
+        # Se organizador vai participar, inscrever automaticamente
+        if participando:
+            user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
+            participante = InscricaoEventoParticipante(
+                inscricao_id=inscricao.id,
+                user_id=interaction.user.id,
+                user_name=interaction.user.name
+            )
+            session.add(participante)
+            session.commit()
+
         # Iniciar timer de 5 minutos
         asyncio.create_task(view.iniciar_timer(message, channel))
 
 
 class InscricaoRanqueadaView(View):
-    """View para inscrição na ranqueada com timer"""
-    def __init__(self, bot, organizador, formato, inscritos, organizador_participando, confronto_channel=None):
+    """View para inscrição na ranqueada com timer (usando mensagem '.')"""
+    def __init__(self, bot, organizador, formato, organizador_participando, confronto_channel=None, guild_id=None):
         super().__init__(timeout=None)
         self.bot = bot
         self.organizador = organizador
         self.formato = formato
-        self.inscritos = inscritos
         self.organizador_participando = organizador_participando
         self.confronto_channel = confronto_channel
+        self.guild_id = guild_id
         self.message = None
         self.finalizado = False
         self.tempo_restante = 300  # 5 minutos
+        self.inscricao_id = None  # Será definido após criar a inscrição
 
         # Configurações baseadas no formato
         # 1x1: max 8, min 4, sorteia 4
@@ -192,64 +208,33 @@ class InscricaoRanqueadaView(View):
             self.min_jogadores = 12
             self.jogadores_sorteio = 12
 
-    @discord.ui.button(label="Participar", style=discord.ButtonStyle.green, emoji="✅", custom_id="ranqueada_participar")
-    async def btn_participar(self, interaction: discord.Interaction, button: Button):
-        if self.finalizado:
-            return await interaction.response.send_message("Esta ranqueada já foi finalizada!", ephemeral=True)
+    def buscar_inscritos(self):
+        """Busca os inscritos da tabela e retorna lista formatada"""
+        if not self.inscricao_id:
+            return []
 
-        # Verificar se já está inscrito
-        for inscrito in self.inscritos:
-            if inscrito['user'].id == interaction.user.id:
-                return await interaction.response.send_message("Você já está inscrito!", ephemeral=True)
+        participantes_db = session.query(InscricaoEventoParticipante).filter_by(inscricao_id=self.inscricao_id).all()
+        guild = self.bot.get_guild(self.guild_id)
 
-        # Verificar se está registrado, se não, registrar automaticamente
-        user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
-        if not user_db:
-            add_user = Users(interaction.user.id, interaction.user.name, 0, interaction.guild.id)
-            session.add(add_user)
-            session.commit()
-            user_db = session.query(Users).filter_by(discord_id=interaction.user.id).first()
+        inscritos = []
+        for i, participante in enumerate(participantes_db):
+            member = guild.get_member(participante.user_id) if guild else None
+            user_db = session.query(Users).filter_by(discord_id=participante.user_id).first()
 
-        # Adicionar à lista
-        self.inscritos.append({
-            'user': interaction.user,
-            'mmr': user_db.MRR,
-            'garantido': False
-        })
+            # Verificar se é o organizador (garantido)
+            eh_organizador = participante.user_id == self.organizador.id and self.organizador_participando
 
-        await interaction.response.send_message(f"✅ Você foi inscrito na ranqueada!", ephemeral=True)
+            inscritos.append({
+                'user': member,
+                'user_id': participante.user_id,
+                'user_name': participante.user_name,
+                'mmr': user_db.MRR if user_db else 0,
+                'garantido': eh_organizador
+            })
 
-        # Atualizar embed
-        await self.atualizar_embed()
+        return inscritos
 
-        # Se bateu o máximo, iniciar imediatamente
-        if len(self.inscritos) >= self.max_jogadores:
-            await self.iniciar_partida(self.message.channel, modo="completo")
-
-    @discord.ui.button(label="Sair", style=discord.ButtonStyle.red, emoji="❌", custom_id="ranqueada_sair")
-    async def btn_sair(self, interaction: discord.Interaction, button: Button):
-        if self.finalizado:
-            return await interaction.response.send_message("Esta ranqueada já foi finalizada!", ephemeral=True)
-
-        # Verificar se está inscrito
-        inscrito_encontrado = None
-        for inscrito in self.inscritos:
-            if inscrito['user'].id == interaction.user.id:
-                inscrito_encontrado = inscrito
-                break
-
-        if not inscrito_encontrado:
-            return await interaction.response.send_message("Você não está inscrito!", ephemeral=True)
-
-        # Remover da lista
-        self.inscritos.remove(inscrito_encontrado)
-
-        await interaction.response.send_message(f"❌ Você saiu da ranqueada!", ephemeral=True)
-
-        # Atualizar embed
-        await self.atualizar_embed()
-
-    @discord.ui.button(label="Cancelar Ranqueada", style=discord.ButtonStyle.gray, emoji="🗑️", custom_id="ranqueada_cancelar", row=1)
+    @discord.ui.button(label="Cancelar Ranqueada", style=discord.ButtonStyle.gray, emoji="🗑️", custom_id="ranqueada_cancelar")
     async def btn_cancelar(self, interaction: discord.Interaction, button: Button):
         # Apenas organizador ou OWNER pode cancelar
         if interaction.user.id != self.organizador.id and interaction.user.id != config_bot.OWNER_ID:
@@ -259,6 +244,13 @@ class InscricaoRanqueadaView(View):
             return await interaction.response.send_message("Esta ranqueada já foi finalizada!", ephemeral=True)
 
         self.finalizado = True
+
+        # Marcar inscrição como inativa
+        if self.inscricao_id:
+            inscricao = session.query(InscricaoEvento).filter_by(id=self.inscricao_id).first()
+            if inscricao:
+                inscricao.ativo = False
+                session.commit()
 
         embed = Embed(
             title="❌ Ranqueada Cancelada",
@@ -283,11 +275,17 @@ class InscricaoRanqueadaView(View):
         minutos = self.tempo_restante // 60
         segundos = self.tempo_restante % 60
 
+        # Buscar inscritos da tabela
+        inscritos = self.buscar_inscritos()
+
         inscritos_texto = ""
-        if self.inscritos:
-            for i, inscrito in enumerate(self.inscritos, 1):
+        if inscritos:
+            for i, inscrito in enumerate(inscritos, 1):
                 garantido = " ⭐" if inscrito.get('garantido') else ""
-                inscritos_texto += f"`{i}.` {inscrito['user'].mention} (MMR: {inscrito['mmr']}){garantido}\n"
+                if inscrito['user']:
+                    inscritos_texto += f"`{i}.` {inscrito['user'].mention} (MMR: {inscrito['mmr']}){garantido}\n"
+                else:
+                    inscritos_texto += f"`{i}.` {inscrito['user_name']} (MMR: {inscrito['mmr']}){garantido}\n"
         else:
             inscritos_texto = "*Nenhum inscrito ainda*"
 
@@ -320,13 +318,13 @@ class InscricaoRanqueadaView(View):
                 f"**Formato:** `{self.formato}`\n"
                 f"**Tempo restante:** `{minutos:02d}:{segundos:02d}`\n\n"
                 f"**Regras:**\n{regras}\n\n"
-                f"**Clique em 'Participar' para entrar!**"
+                f"**Digite `.` no chat para participar!**"
             ),
             color=discord.Color.gold()
         )
 
         embed.add_field(
-            name=f"📋 Inscritos ({len(self.inscritos)}/{self.max_jogadores})",
+            name=f"📋 Inscritos ({len(inscritos)}/{self.max_jogadores})",
             value=inscritos_texto,
             inline=False
         )
@@ -343,17 +341,21 @@ class InscricaoRanqueadaView(View):
             if self.finalizado:
                 return
 
+            # Buscar inscritos atuais
+            inscritos = self.buscar_inscritos()
+
             # Atualizar embed com tempo restante
             await self.atualizar_embed()
 
             # Verificar se já bateu o máximo
-            if len(self.inscritos) >= self.max_jogadores:
+            if len(inscritos) >= self.max_jogadores:
                 await self.iniciar_partida(channel, modo="completo")
                 return
 
         # Tempo acabou
         if not self.finalizado:
-            if len(self.inscritos) >= self.min_jogadores:
+            inscritos = self.buscar_inscritos()
+            if len(inscritos) >= self.min_jogadores:
                 await self.iniciar_partida(channel, modo="sorteio")
             else:
                 await self.cancelar_por_falta_jogadores(channel)
@@ -365,14 +367,24 @@ class InscricaoRanqueadaView(View):
 
         self.finalizado = True
 
+        # Marcar inscrição como inativa
+        if self.inscricao_id:
+            inscricao = session.query(InscricaoEvento).filter_by(id=self.inscricao_id).first()
+            if inscricao:
+                inscricao.ativo = False
+                session.commit()
+
+        # Buscar inscritos da tabela
+        inscritos = self.buscar_inscritos()
+
         if modo == "completo":
             # Pegar os jogadores até o máximo
-            jogadores_selecionados = self.inscritos[:self.max_jogadores]
+            jogadores_selecionados = inscritos[:self.max_jogadores]
             titulo = f"🏆 Ranqueada Iniciada! ({self.max_jogadores} jogadores)"
         else:
             # Sortear jogadores, garantindo o organizador se estiver participando
-            garantidos = [i for i in self.inscritos if i.get('garantido')]
-            nao_garantidos = [i for i in self.inscritos if not i.get('garantido')]
+            garantidos = [i for i in inscritos if i.get('garantido')]
+            nao_garantidos = [i for i in inscritos if not i.get('garantido')]
 
             vagas_sorteio = self.jogadores_sorteio - len(garantidos)
 
@@ -398,9 +410,11 @@ class InscricaoRanqueadaView(View):
                     j1 = jogadores_embaralhados[i]
                     j2 = jogadores_embaralhados[i + 1]
                     dupla_num = (i // 2) + 1
-                    jogadores_texto += f"**Dupla {dupla_num}:** {j1['user'].mention} + {j2['user'].mention}\n"
-                    jogadores_ids.append(j1['user'].id)
-                    jogadores_ids.append(j2['user'].id)
+                    j1_mention = j1['user'].mention if j1['user'] else j1['user_name']
+                    j2_mention = j2['user'].mention if j2['user'] else j2['user_name']
+                    jogadores_texto += f"**Dupla {dupla_num}:** {j1_mention} + {j2_mention}\n"
+                    jogadores_ids.append(j1['user_id'])
+                    jogadores_ids.append(j2['user_id'])
 
             # Atualizar jogadores_selecionados com a ordem embaralhada
             jogadores_selecionados = jogadores_embaralhados
@@ -419,10 +433,13 @@ class InscricaoRanqueadaView(View):
                     j2 = jogadores_embaralhados[i + 1]
                     j3 = jogadores_embaralhados[i + 2]
                     trio_num = (i // 3) + 1
-                    jogadores_texto += f"**Trio {trio_num}:** {j1['user'].mention} + {j2['user'].mention} + {j3['user'].mention}\n"
-                    jogadores_ids.append(j1['user'].id)
-                    jogadores_ids.append(j2['user'].id)
-                    jogadores_ids.append(j3['user'].id)
+                    j1_mention = j1['user'].mention if j1['user'] else j1['user_name']
+                    j2_mention = j2['user'].mention if j2['user'] else j2['user_name']
+                    j3_mention = j3['user'].mention if j3['user'] else j3['user_name']
+                    jogadores_texto += f"**Trio {trio_num}:** {j1_mention} + {j2_mention} + {j3_mention}\n"
+                    jogadores_ids.append(j1['user_id'])
+                    jogadores_ids.append(j2['user_id'])
+                    jogadores_ids.append(j3['user_id'])
 
             # Atualizar jogadores_selecionados com a ordem embaralhada
             jogadores_selecionados = jogadores_embaralhados
@@ -432,8 +449,9 @@ class InscricaoRanqueadaView(View):
             jogadores_texto = ""
             jogadores_ids = []
             for i, jogador in enumerate(jogadores_selecionados, 1):
-                jogadores_texto += f"`{i}.` {jogador['user'].mention} (MMR: {jogador['mmr']})\n"
-                jogadores_ids.append(jogador['user'].id)
+                jogador_mention = jogador['user'].mention if jogador['user'] else jogador['user_name']
+                jogadores_texto += f"`{i}.` {jogador_mention} (MMR: {jogador['mmr']})\n"
+                jogadores_ids.append(jogador['user_id'])
 
         embed = Embed(
             title=titulo,
@@ -458,8 +476,8 @@ class InscricaoRanqueadaView(View):
         # Atualizar embed no canal de inscrição
         await self.message.edit(embed=embed, view=None)
 
-        # Mencionar jogadores no canal de inscrição
-        mencoes = " ".join([j['user'].mention for j in jogadores_selecionados])
+        # Mencionar jogadores no canal de inscrição (apenas os que ainda estão no servidor)
+        mencoes = " ".join([f"<@{j['user_id']}>" for j in jogadores_selecionados])
         await channel.send(f"🎮 **Ranqueada iniciada!** {mencoes}")
 
         # Enviar para o canal de confronto se configurado
@@ -476,11 +494,21 @@ class InscricaoRanqueadaView(View):
 
         self.finalizado = True
 
+        # Marcar inscrição como inativa
+        if self.inscricao_id:
+            inscricao = session.query(InscricaoEvento).filter_by(id=self.inscricao_id).first()
+            if inscricao:
+                inscricao.ativo = False
+                session.commit()
+
+        # Buscar inscritos para mostrar a quantidade
+        inscritos = self.buscar_inscritos()
+
         embed = Embed(
             title="❌ Ranqueada Cancelada",
             description=(
                 f"Não houve jogadores suficientes.\n\n"
-                f"**Inscritos:** {len(self.inscritos)}/{self.min_jogadores} (mínimo)\n"
+                f"**Inscritos:** {len(inscritos)}/{self.min_jogadores} (mínimo)\n"
                 f"**Organizador:** {self.organizador.mention}"
             ),
             color=discord.Color.red()
