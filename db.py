@@ -229,4 +229,46 @@ class JuradoContador(Base):
         self.contador_evento = contador_evento
 
 
+class InscricaoEvento(Base):
+    """Rastreia eventos abertos para inscrição via mensagem '.'"""
+    __tablename__ = "InscricaoEvento"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer)
+    channel_id = Column(Integer)
+    message_id = Column(Integer, unique=True)
+    autor_id = Column(Integer)
+    formato = Column(String)
+    vagas = Column(Integer)
+    tipo_evento = Column(String)
+    modo_sorteio = Column(String)
+    ativo = Column(Boolean, default=True)
+
+    def __init__(self, guild_id, channel_id, message_id, autor_id, formato, vagas, tipo_evento, modo_sorteio):
+        self.guild_id = guild_id
+        self.channel_id = channel_id
+        self.message_id = message_id
+        self.autor_id = autor_id
+        self.formato = formato
+        self.vagas = vagas
+        self.tipo_evento = tipo_evento
+        self.modo_sorteio = modo_sorteio
+        self.ativo = True
+
+
+class InscricaoEventoParticipante(Base):
+    """Participantes inscritos em eventos via mensagem '.'"""
+    __tablename__ = "InscricaoEventoParticipante"
+
+    id = Column(Integer, primary_key=True)
+    inscricao_id = Column(Integer)  # ID da InscricaoEvento
+    user_id = Column(Integer)
+    user_name = Column(String)
+
+    def __init__(self, inscricao_id, user_id, user_name):
+        self.inscricao_id = inscricao_id
+        self.user_id = user_id
+        self.user_name = user_name
+
+
 Base.metadata.create_all(bind=db)

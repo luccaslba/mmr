@@ -2,7 +2,7 @@ import discord, emojis, asyncio, pytz, functions, config_bot
 from datetime import datetime, timezone, time
 from discord import Embed
 from discord.ui import View, Button, Modal, TextInput, Select, UserSelect
-from db import session, Users, Guild_Config, CargosPremiacao
+from db import session, Users, Guild_Config, CargosPremiacao, InscricaoEvento
 
 # Modal simplificado - apenas Data e Horário
 class DataHorarioModal(Modal, title="Data e Horário do Evento"):
@@ -79,7 +79,7 @@ class DataHorarioModal(Modal, title="Data e Horário do Evento"):
         if self.tipo_evento == "bdf":
             instrucao = f"⚔️ **Evento BDF - Vagas Garantidas**\nO organizador irá adicionar os participantes manualmente."
         else:
-            instrucao = "Reaja com ✅ para participar!"
+            instrucao = "Digite **`.`** no chat para participar!"
 
         # Montar texto de premiação
         if self.cargo_premiacao_id:
@@ -126,9 +126,21 @@ class DataHorarioModal(Modal, title="Data e Horário do Evento"):
         # Atualizar message_id na view
         gerenciar_view.message_id = message.id
 
-        # BDF não usa reações
+        # BDF não usa inscrição por mensagem
         if self.tipo_evento != "bdf":
-            await message.add_reaction("✅")
+            # Criar registro de inscrição aberta
+            inscricao = InscricaoEvento(
+                guild_id=interaction.guild.id,
+                channel_id=channel.id,
+                message_id=message.id,
+                autor_id=interaction.user.id,
+                formato=self.formato,
+                vagas=self.vagas,
+                tipo_evento=self.tipo_evento,
+                modo_sorteio=self.modo_sorteio
+            )
+            session.add(inscricao)
+            session.commit()
 
             asyncio.create_task(functions.aguardar_e_iniciar_matchmaking(
                 self.bot,

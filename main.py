@@ -1,7 +1,7 @@
 import discord, config_bot, os, db, functions, sqlite3
 from discord.ext import commands
 from discord.ext.commands import Bot
-from db import MatchParticipantes
+from db import MatchParticipantes, InscricaoEvento, InscricaoEventoParticipante, Users, session
 from ui.buttons.start_matchmaking import StartMatchMakingV2
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
 from ui.buttons.start_ranqueada import StartRanqueadaView
@@ -60,6 +60,59 @@ async def on_ready():
     bot.add_view(StartMatchMakingV2(bot))
     bot.add_view(StartRanqueadaView(bot))
     await load_commands()
+
+
+@bot.event
+async def on_message(message):
+    # Ignorar mensagens de bots
+    if message.author.bot:
+        return
+
+    # Verificar se é "." para inscrição em evento
+    if message.content.strip() == ".":
+        # Verificar se há inscrição aberta neste canal
+        inscricao = session.query(InscricaoEvento).filter_by(
+            channel_id=message.channel.id,
+            ativo=True
+        ).first()
+
+        if inscricao:
+            # Verificar se usuário já está inscrito
+            ja_inscrito = session.query(InscricaoEventoParticipante).filter_by(
+                inscricao_id=inscricao.id,
+                user_id=message.author.id
+            ).first()
+
+            if ja_inscrito:
+                # Usuário já está inscrito - não faz nada
+                pass
+            else:
+                # Verificar se usuário está registrado no bot, se não, registrar
+                user_db = session.query(Users).filter_by(discord_id=message.author.id).first()
+                if not user_db:
+                    add_user = Users(message.author.id, message.author.name, 0, message.guild.id)
+                    session.add(add_user)
+                    session.commit()
+
+                # Verificar restrição de MMR para eventos fechados
+                if inscricao.tipo_evento in ["f", "fechado"]:
+                    user_db = session.query(Users).filter_by(discord_id=message.author.id).first()
+                    guild_config = session.query(db.Guild_Config).filter_by(guild_id=message.guild.id).first()
+                    if guild_config and user_db.MRR < guild_config.match_close_count:
+                        # MMR insuficiente - não inscreve
+                        return await bot.process_commands(message)
+
+                # Inscrever usuário
+                participante = InscricaoEventoParticipante(
+                    inscricao_id=inscricao.id,
+                    user_id=message.author.id,
+                    user_name=message.author.name
+                )
+                session.add(participante)
+                session.commit()
+
+    # Processar comandos normalmente
+    await bot.process_commands(message)
 
 @bot.command()
 async def sync(ctx: commands.Context):
@@ -246,6 +299,48 @@ async def migrate(ctx: commands.Context):
                 migracoes_aplicadas.append("✅ Tabela `JuradoContador` criada com sucesso")
             else:
                 migracoes_desnecessarias.append("Tabela `JuradoContador` já existe")
+
+            # Migração 10: Criar tabela InscricaoEvento
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='InscricaoEvento'")
+            tabela_inscricao_existe = cursor.fetchone()
+
+            if not tabela_inscricao_existe:
+                cursor.execute("""
+                    CREATE TABLE InscricaoEvento (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id INTEGER NOT NULL,
+                        channel_id INTEGER NOT NULL,
+                        message_id INTEGER UNIQUE NOT NULL,
+                        autor_id INTEGER NOT NULL,
+                        formato TEXT,
+                        vagas INTEGER,
+                        tipo_evento TEXT,
+                        modo_sorteio TEXT,
+                        ativo BOOLEAN DEFAULT 1
+                    )
+                """)
+                conn.commit()
+                migracoes_aplicadas.append("✅ Tabela `InscricaoEvento` criada com sucesso")
+            else:
+                migracoes_desnecessarias.append("Tabela `InscricaoEvento` já existe")
+
+            # Migração 11: Criar tabela InscricaoEventoParticipante
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='InscricaoEventoParticipante'")
+            tabela_participante_existe = cursor.fetchone()
+
+            if not tabela_participante_existe:
+                cursor.execute("""
+                    CREATE TABLE InscricaoEventoParticipante (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        inscricao_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        user_name TEXT
+                    )
+                """)
+                conn.commit()
+                migracoes_aplicadas.append("✅ Tabela `InscricaoEventoParticipante` criada com sucesso")
+            else:
+                migracoes_desnecessarias.append("Tabela `InscricaoEventoParticipante` já existe")
 
             conn.close()
 

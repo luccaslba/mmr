@@ -1,7 +1,7 @@
 import asyncio, discord, random, pytz
 from datetime import datetime, timezone, date
 from sqlalchemy.orm import sessionmaker
-from db import session, Users, Guild_Config, CloseMatchMember, MatchParticipantes, MatchPartidaParticipantes, RolesVips, ConstantesK, UsersWeekly
+from db import session, Users, Guild_Config, CloseMatchMember, MatchParticipantes, MatchPartidaParticipantes, RolesVips, ConstantesK, UsersWeekly, InscricaoEvento, InscricaoEventoParticipante
 from discord import Embed
 from ui.buttons.finalizar_matchmaking import FinalizarMatchmaking
 
@@ -55,42 +55,59 @@ async def aguardar_e_iniciar_matchmaking(bot, guild_id, channel_id, message_id, 
 
     print("[Matchmaking] Hora de iniciar o matchmaking!")
 
-
     channel = bot.get_channel(channel_id)
-    await asyncio.sleep(1)  # Garante tempo para reações serem processadas
-    message = await channel.fetch_message(message_id)
+    await asyncio.sleep(1)  # Garante tempo para inscrições serem processadas
 
-    reaction = next((r for r in message.reactions if str(r.emoji) == "✅"), None)
-    if not reaction:
-        return await channel.send("❌ Nenhuma reação encontrada.")
+    # Buscar inscrição do evento
+    inscricao = session.query(InscricaoEvento).filter_by(message_id=message_id).first()
+    if not inscricao:
+        return await channel.send("❌ Inscrição do evento não encontrada.")
+
+    # Marcar inscrição como inativa (encerrada)
+    inscricao.ativo = False
+    session.commit()
 
     guild = session.query(Guild_Config).filter_by(guild_id=guild_id).first()
 
     print(f"Tipo de evento: {tipo_evento}")
     print(f"Guilda match_close_count: {guild.match_close_count}")
 
+    # Buscar participantes inscritos via "."
+    participantes_db = session.query(InscricaoEventoParticipante).filter_by(inscricao_id=inscricao.id).all()
+
     jogadores = []
-    async for user in reaction.users():
+    guild_obj = bot.get_guild(guild_id)
+
+    for participante in participantes_db:
+        user = guild_obj.get_member(participante.user_id)
+        if not user:
+            continue
+
         user_db = session.query(Users).filter_by(discord_id=user.id).first()
 
-        if not user.bot:
-            if not user_db:
-                add_user = Users(user.id, user.name, 0, user.guild.id)
-                session.add(add_user)
-                session.commit()
+        if not user_db:
+            add_user = Users(user.id, user.name, 0, guild_id)
+            session.add(add_user)
+            session.commit()
+            user_db = session.query(Users).filter_by(discord_id=user.id).first()
 
-            if tipo_evento in ["f", "fechado"]:
-                user_db = session.query(Users).filter_by(discord_id=user.id).first()
-                if user_db.MRR < guild.match_close_count:
-                    continue
-            
-            member = session.query(MatchParticipantes).filter_by(discord_id=user.id).first()
-            if not member:
-                add_member = MatchParticipantes(user.id, user.name, autor.id)
-                session.add(add_member)
-                session.commit()
-            jogadores.append(user)
-            print(f"{user.name} adicionado à lista de jogadores")
+        # Restrição de MMR já foi verificada no on_message, mas verifica novamente por segurança
+        if tipo_evento in ["f", "fechado"]:
+            if user_db.MRR < guild.match_close_count:
+                continue
+
+        member = session.query(MatchParticipantes).filter_by(discord_id=user.id).first()
+        if not member:
+            add_member = MatchParticipantes(user.id, user.name, autor.id)
+            session.add(add_member)
+            session.commit()
+        jogadores.append(user)
+        print(f"{user.name} adicionado à lista de jogadores")
+
+    # Limpar participantes da tabela de inscrição (já foram processados)
+    for participante in participantes_db:
+        session.delete(participante)
+    session.commit()
 
 
 
