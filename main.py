@@ -81,18 +81,21 @@ async def on_message(message):
     # Verificar se começa com "." para inscrição em evento/ranqueada
     conteudo = message.content.strip()
     if conteudo.startswith("."):
-        # Refresh da sessão para pegar dados atualizados
-        session.expire_all()
+        try:
+            # Refresh da sessão para pegar dados atualizados
+            session.expire_all()
 
-        # Verificar se há inscrição aberta neste canal
-        inscricao = session.query(InscricaoEvento).filter_by(
-            channel_id=message.channel.id,
-            ativo=True
-        ).first()
+            # Verificar se há inscrição aberta neste canal
+            inscricao = session.query(InscricaoEvento).filter_by(
+                channel_id=message.channel.id,
+                ativo=True
+            ).first()
 
-        print(f"[DEBUG] Mensagem '.' detectada no canal {message.channel.id}, inscricao encontrada: {inscricao is not None}")
+            print(f"[DEBUG] Mensagem '.' detectada no canal {message.channel.id}, inscricao encontrada: {inscricao is not None}")
 
         if inscricao:
+            print(f"[DEBUG] Inscricao ID: {inscricao.id}, formato: {inscricao.formato}, ativo: {inscricao.ativo}")
+
             # Pegar menções da mensagem (excluindo bots)
             mencoes = [m for m in message.mentions if not m.bot and m.id != message.author.id]
 
@@ -107,6 +110,7 @@ async def on_message(message):
             max_mencoes = tamanho_time - 1  # 1x1=0, 2x2=1, 3x3=2
             if len(mencoes) > max_mencoes:
                 # Muitas menções - ignorar silenciosamente
+                print(f"[DEBUG] Muitas menções ({len(mencoes)} > {max_mencoes}), ignorando")
                 return await bot.process_commands(message)
 
             # Verificar se autor já está inscrito
@@ -114,6 +118,8 @@ async def on_message(message):
                 inscricao_id=inscricao.id,
                 user_id=message.author.id
             ).first()
+
+            print(f"[DEBUG] Autor {message.author.name} já inscrito: {autor_inscrito is not None}")
 
             if autor_inscrito:
                 # Se autor já está inscrito mas mandou menções, pode estar formando time
@@ -201,6 +207,7 @@ async def on_message(message):
                 )
                 session.add(participante)
                 session.commit()
+                print(f"[DEBUG] ✅ {message.author.name} inscrito com sucesso! ID: {participante.id}")
 
                 # Processar menções para adicionar à equipe
                 for mencionado in mencoes:
@@ -241,6 +248,10 @@ async def on_message(message):
                         )
                         session.add(participante)
                         session.commit()
+        except Exception as e:
+            print(f"[DEBUG] ❌ ERRO na inscrição: {e}")
+            import traceback
+            traceback.print_exc()
 
     # Processar comandos normalmente
     await bot.process_commands(message)
